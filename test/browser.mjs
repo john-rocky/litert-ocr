@@ -8,11 +8,13 @@ import { startServer } from './server.mjs';
 
 const mode = process.argv[2] ?? 'webgpu';
 const outFile = process.argv[3];
-const S = await startServer(0);
+// optional: a rewritten 320-wide recognizer for the WebGPU-recognizer case (not published; see README)
+const REC320 = process.env.LITERT_OCR_TEST_REC320;
+const S = await startServer(0, REC320 ? { extraRoots: { '/extra/': REC320.replace(/[^/]+$/, '') } } : {});
 const S2 = await startServer(0); // a second origin for the cross-origin cases
 const origin = `http://127.0.0.1:${S.port}`;
 const otherOrigin = `http://127.0.0.1:${S2.port}`;
-const args = mode === 'wasm' ? ['--disable-gpu', '--disable-features=WebGPU,Vulkan', '--mute-audio'] : ['--enable-unsafe-webgpu', '--mute-audio'];
+const args = mode === 'wasm' ? ['--disable-gpu', '--disable-blink-features=WebGPU', '--disable-features=WebGPU,Vulkan', '--mute-audio'] : ['--mute-audio'];
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args });
 const results = [];
 const chromeVersion = browser.version();
@@ -31,11 +33,16 @@ async function open(prefix, setup) {
   return { context, page, consoleLines };
 }
 
-async function run(page, name, cfg = {}, timeout = 240000) {
+async function run(page, name, cfg = {}, timeout = 180000) {
   const start = Date.now();
   let r;
   try {
-    r = await page.evaluate(({ name, cfg }) => window.tests[name](cfg), { name, cfg }, { timeout });
+    let timer;
+    r = await Promise.race([
+      page.evaluate(({ name, cfg }) => window.tests[name](cfg), { name, cfg }),
+      new Promise((_, bad) => { timer = setTimeout(() => bad(new Error(`case timed out after ${timeout} ms`)), timeout); }),
+    ]);
+    clearTimeout(timer);
   } catch (e) {
     r = { ok: false, error: String(e?.message ?? e).slice(0, 1500) };
   }
@@ -58,6 +65,7 @@ try {
   for (const name of ['fixtures', 'outputs', 'inputs', 'rectangle', 'whitelist', 'singleLine', 'bigImage', 'scheduler', 'oldRecognize', 'langs', 'logger']) await run(main.page, name);
   for (const name of ['failModel404', 'failSha256', 'failWasm404', 'failDecode', 'failType', 'failImage404', 'failRectangle', 'failTerminated', 'failErrorHandler', 'failDetectAndOutputs', 'forcedWasm']) await run(main.page, name);
   await run(main.page, 'failCrossOriginFetch', { otherOrigin });
+  await run(main.page, 'webgpuRecognizer', REC320 ? { mode, rec320Url: `${origin}/coi/extra/${REC320.split('/').pop()}`, rec320Sha: process.env.LITERT_OCR_TEST_REC320_SHA256 } : { mode });
   consoleLog.main = main.consoleLines.slice(0, 120);
   await main.context.close();
 

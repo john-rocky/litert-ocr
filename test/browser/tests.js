@@ -137,15 +137,26 @@ window.tests = {
       OffscreenCanvas: off, ImageBitmap: bitmap, ImageData: imageData, '{data,width,height}': { data: imageData.data, width: imageData.width, height: imageData.height },
     };
     const out = {};
+    const diffs = {};
+    const want = (await fixtures())['mobile.png'].lines;
     for (const [k, v] of Object.entries(cases)) {
       try {
-        out[k] = (await w.recognize(v)).data.text === base ? 'same' : 'DIFFERENT';
+        const t = (await w.recognize(v)).data.text;
+        if (t === base) out[k] = 'same';
+        else {
+          // a GPU-backed canvas can hand over slightly different pixels than the decoded file: then the
+          // expected lines must still be read (>= 95 %), and the differing lines are recorded
+          const m = lineMatch(t, want);
+          out[k] = m.rate >= 0.95 ? 'close' : 'DIFFERENT';
+          const a = base.split('\n'), b = t.split('\n');
+          diffs[k] = { rate: m.rate, onlyBase: a.filter((x) => !b.includes(x)), onlyThis: b.filter((x) => !a.includes(x)) };
+        }
       } catch (e) {
         out[k] = `ERROR ${e.code}: ${e.message}`;
       }
     }
     out['ImageBitmap still usable'] = bitmap.width > 0 ? 'same' : 'DETACHED';
-    return { ok: Object.values(out).every((v) => v === 'same'), out };
+    return { ok: Object.values(out).every((v) => v === 'same' || v === 'close'), out, diffs };
   },
 
   async rectangle() {
@@ -236,6 +247,36 @@ window.tests = {
     const moduleResult = await run('module');
     const classicResult = await run('classic');
     return { ok: classicResult === 'importScripts worked' && moduleResult !== 'importScripts worked', module: moduleResult, classic: classicResult };
+  },
+
+  // recognizer: 'webgpu' with a 320 file that has no #9661 fault (given by the runner): every fixture must read
+  // the same as the WebAssembly recognizer; without that file the 320 recognizer must stay on WebAssembly.
+  async webgpuRecognizer({ rec320Url, rec320Sha, mode }) {
+    if (!rec320Url) return { ok: true, skipped: 'set LITERT_OCR_TEST_REC320 (and _SHA256) to a rewritten 320 file to run this case' };
+    const exp = await fixtures();
+    const wasm = await worker();
+    const gpu = await ocr.createWorker('eng', 1, local({ recognizer: 'webgpu', modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } }));
+    const out = {};
+    let same = true;
+    for (const file of Object.keys(exp)) {
+      const a = (await wasm.recognize(FIX + file)).data.text;
+      const t0 = performance.now();
+      const b = (await gpu.recognize(FIX + file)).data.text;
+      out[file] = { same: a === b, ms: Math.round(performance.now() - t0) };
+      if (a !== b) {
+        same = false;
+        const al = a.split('\n'), bl = b.split('\n');
+        out[file].onlyWasm = al.filter((x) => !bl.includes(x));
+        out[file].onlyWebgpu = bl.filter((x) => !al.includes(x));
+      }
+    }
+    const info = gpu.info;
+    await gpu.terminate();
+    const plain = await ocr.createWorker('eng', 1, local({ recognizer: 'webgpu' }));
+    const plainInfo = plain.info;
+    await plain.terminate();
+    const want = mode === 'webgpu' ? 'webgpu' : 'wasm';
+    return { ok: same && info.recognizers['320'] === want && info.recognizers['640'] === want && plainInfo.recognizers['320'] === 'wasm', info, plainInfo, out };
   },
 
   // ---- failure paths ----------------------------------------------------------------------------------

@@ -23,7 +23,7 @@ function sh(name, cmd, args, cwd) {
 }
 
 async function readOne(url, label, route) {
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--mute-audio'] });
+  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
   const t0 = Date.now();
   try {
     const context = await browser.newContext();
@@ -50,6 +50,7 @@ async function readOne(url, label, route) {
   }
 }
 
+mkdirSync(join(ROOT, 'examples/.pack'), { recursive: true });
 sh('pack', 'npm', ['pack', '--pack-destination', 'examples/.pack'], ROOT);
 const S = await startServer(0, { extraRoots: { '/ex-react/': join(ROOT, 'examples/react-vite/dist/') } });
 try {

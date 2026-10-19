@@ -4,7 +4,7 @@
 import * as litert from '@litertjs/core';
 import { OcrError, errText } from '../core/errors.js';
 import { createHandler, type Platform, type Prepared } from '../core/handler.js';
-import { LITERT_FILES, LITERT_WASM_BASE, type RuntimeVariant } from '../core/models.js';
+import { LITERT_FILES, LITERT_WASM_BASE, litertPrint, type RuntimeVariant } from '../core/models.js';
 import type { WireImage } from '../core/protocol.js';
 import { sha256Hex } from '../core/sha256.js';
 import type { Rectangle } from '../core/types.js';
@@ -25,6 +25,10 @@ const platform: Platform<ImageBitmap> = {
     const coi = self.crossOriginIsolated === true;
     const relaxedSimd = await litert.supportsFeature('relaxedSimd').catch(() => false);
     let threads = coi && relaxedSimd && typeof SharedArrayBuffer !== 'undefined';
+    if (threads && !(await blobWorkersStart())) {
+      threads = false;
+      io.notice('This page does not allow blob: workers (Content-Security-Policy worker-src), which WebAssembly threads start from; WebAssembly runs on 1 thread. Add "worker-src blob:" to use threads.', 'warn');
+    }
     if (!coi) {
       io.notice(
         'This page is not cross-origin isolated, so WebAssembly runs on 1 thread (several times slower). Serve the page with ' +
@@ -49,7 +53,7 @@ const platform: Platform<ImageBitmap> = {
       const original = self.importScripts;
       const wanted = new URL(f.js.file, base).href;
       self.importScripts = (...urls: string[]) => original.apply(self, urls.map((u) => (u === wanted ? glueUrl : u)));
-      self.Module = { wasmBinary: wasm, mainScriptUrlOrBlob: glue, locateFile: (p: string) => new URL(p, base).href };
+      self.Module = { ...litertPrint, wasmBinary: wasm, mainScriptUrlOrBlob: glue, locateFile: (p: string) => new URL(p, base).href };
       try {
         await litert.loadLiteRt(base, useThreads ? { threads: true } : {});
       } finally {
@@ -173,6 +177,22 @@ const platform: Platform<ImageBitmap> = {
   ops: canvasOps as Platform<ImageBitmap>['ops'],
 };
 
+/** Can this worker start a worker from a blob: URL (LiteRT.js's pthreads do)? */
+function blobWorkersStart(): Promise<boolean> {
+  return new Promise((ok) => {
+    let w: Worker | null = null;
+    const done = (v: boolean) => { clearTimeout(t); try { w?.terminate(); } catch { /* ignore */ } ok(v); };
+    const t = setTimeout(() => done(false), 1000);
+    try {
+      w = new Worker(URL.createObjectURL(new Blob(['postMessage(1)'], { type: 'text/javascript' })));
+      w.onmessage = () => done(true);
+      w.onerror = () => done(false);
+    } catch {
+      done(false);
+    }
+  });
+}
+
 function checkReadable(bitmap: ImageBitmap) {
   const c = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!;
   c.drawImage(bitmap, 0, 0, 1, 1);
@@ -201,3 +221,4 @@ const shortUrl = (u: string) => (u.startsWith('data:') ? u.slice(0, 40) + '…' 
 
 const handler = createHandler(platform, (msg) => self.postMessage(msg));
 self.onmessage = (e: MessageEvent) => handler(e.data);
+self.postMessage({ type: 'hello' });

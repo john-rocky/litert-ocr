@@ -64,7 +64,7 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Without these headers OCR still works, on one thread (several times slower), and the logger and the console say so. When you cannot set headers (GitHub Pages), [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) sets them from a service worker. `worker.info` reports where the worker runs: `{ detector: 'webgpu' | 'wasm', recognizer: 'wasm', threads, runtime, model, platform }`.
+Without these headers OCR still works, on one thread (several times slower), and the logger and the console say so. When you cannot set headers (GitHub Pages), [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) sets them from a service worker. `worker.info` reports where the worker runs: `{ detector, recognizer, recognizers, threads, runtime, model, platform }`.
 
 Why the recognizer runs on WebAssembly: with LiteRT.js 2.5.3 on WebGPU its output differs from WebAssembly on many lines (376 of 496 test lines read the same on an Apple M4 Max in Chrome 155, 2026-10-19), the fault reported for PP-OCRv5 in [LiteRT issue #9661](https://github.com/google-ai-edge/LiteRT/issues/9661). The detector reads the same on both.
 
@@ -95,7 +95,8 @@ Options for where the files come from:
 import { createWorker, createScheduler, recognize, PSM, OEM, OcrError, modelInfo } from 'litert-ocr';
 ```
 
-- `createWorker(langs?, oem?, options?)` → `Promise<Worker>`. Options: `logger`, `errorHandler`, `modelBase`, `modelFiles`, `wasmPath`, `workerPath`, `backend` (`'auto'` or `'wasm'`), `eager`, `cachePath`, `cacheMethod`.
+- `createWorker(langs?, oem?, options?)` → `Promise<Worker>`. Options: `logger`, `errorHandler`, `modelBase`, `modelFiles`, `wasmPath`, `workerPath`, `backend` (`'auto'` = detector on WebGPU when it compiles, the browser default; `'wasm'`, the Node.js default), `recognizer` (below), `eager`, `cachePath`, `cacheMethod`.
+- `recognizer: 'webgpu'` (experimental): the 640 and 960 recognizers run on WebGPU, where the published files read the same as on WebAssembly. The 320 one moves to WebGPU only when `modelFiles.rec320` replaces the published file (which misreads there) with one that does not; no such file is published yet, so by default it stays on WebAssembly and a notice says so. `worker.info.recognizers` shows where each width runs.
 - `worker.recognize(image, options?, output?, jobId?)` → `{ jobId, data }`. `image`: a URL or data URL, `File`, `Blob`, `<img>`, `<canvas>`, `CanvasRenderingContext2D`, `OffscreenCanvas`, `ImageBitmap`, `ImageData`, an `ArrayBuffer` / `Uint8Array` / `Buffer` of an image file, `{ data, width, height }` (RGBA), and in Node.js a file path. `options.rectangle = { left, top, width, height }` reads only that region (boxes stay in whole-image pixels). `output` defaults to `{ text: true }`; add `blocks: true`, `hocr: true`, `tsv: true`.
 - `data.text`: the lines, each ending in `"\n"`. `data.confidence`: mean word confidence, 0-100. `data.blocks` (when asked): `blocks[].paragraphs[].lines[].words[].symbols[]`, each with `text`, `confidence` (0-100) and `bbox { x0, y0, x1, y1 }`.
 - `worker.setParameters(params)`, `worker.terminate()` (a second call resolves and does nothing), `worker.reinitialize()` (no-op), `worker.info`.

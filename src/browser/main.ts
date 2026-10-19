@@ -62,6 +62,10 @@ function spawn(options: Partial<WorkerOptions>): Transport {
   };
 }
 
+function startTimeoutHint(options: Partial<WorkerOptions>): string {
+  return startHint('it sent nothing within 20 s', options);
+}
+
 function startHint(reason: string, options: Partial<WorkerOptions>): string {
   return options.workerPath
     ? `The worker at ${options.workerPath} could not start (${reason}). workerPath must point at this package's dist/worker.js on the page's own origin.`
@@ -109,6 +113,17 @@ async function toWire(image: ImageLike): Promise<{ wire: WireImage; transfer: Tr
     } catch (e) {
       throw new OcrError('IMAGE_DECODE_FAILED', `This ${(image as object).constructor?.name ?? 'image'} could not be read (${errText(e)}).`);
     }
+    try {
+      const probe = new OffscreenCanvas(1, 1).getContext('2d')!;
+      probe.drawImage(bitmap, 0, 0, 1, 1);
+      probe.getImageData(0, 0, 1, 1);
+    } catch (e) {
+      bitmap.close();
+      throw new OcrError(
+        'IMAGE_CROSS_ORIGIN',
+        `This image comes from another origin without CORS, so its pixels cannot be read (${errText(e)}). Load it with crossOrigin="anonymous" from a server that sends Access-Control-Allow-Origin, or fetch it on your own server and pass the Blob.`,
+      );
+    }
     return { wire: { kind: 'bitmap', bitmap }, transfer: [bitmap] };
   }
   if (image && typeof image === 'object' && 'data' in image && 'width' in image && 'height' in image) {
@@ -131,6 +146,7 @@ export function describe(v: unknown): string {
 export const browserMain: MainPlatform = {
   name: 'browser',
   spawn,
+  startTimeoutHint,
   toWire,
   resolveUrl,
   defaults: { modelBase: MODEL_BASE, wasmPath: LITERT_WASM_BASE },

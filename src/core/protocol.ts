@@ -12,6 +12,8 @@ export interface InitOptions {
   /** Absolute URL of the LiteRT.js wasm directory (browser). */
   wasmPath: string;
   backend: 'auto' | 'wasm';
+  /** Where the recognizers run (see WorkerOptions.recognizer); absent = 'wasm'. */
+  recognizer?: 'wasm' | 'webgpu';
   cacheMethod: CacheMethod;
   cachePath?: string;
   /** Load the 640 and 960 recognizers at start instead of on first use. */
@@ -50,6 +52,7 @@ export interface ProgressData {
 }
 
 export type Response =
+  | { type: 'hello' }
   | { type: 'progress'; id: string; data: ProgressData }
   | { type: 'resolve'; id: string; data: unknown }
   | { type: 'reject'; id: string; error: SerializedError };

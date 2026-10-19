@@ -9,7 +9,9 @@ export { OcrError } from './core/errors.js';
 export { modelInfo } from './core/models.js';
 export type { StartupInfo } from './api.js';
 
-const api = makeApi(nodeMain);
+import { documented } from './exports.js';
+
+const api = documented(makeApi(nodeMain));
 
 export const { createWorker, recognize, detect, createScheduler, setLogging, OEM, PSM, languages } = api;
 export default api;

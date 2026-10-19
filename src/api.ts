@@ -31,6 +31,8 @@ export interface Transport {
 export interface MainPlatform {
   name: 'browser' | 'node';
   spawn(options: Partial<WorkerOptions>): Transport;
+  /** Message for a worker that never started (no hello within START_TIMEOUT_MS). */
+  startTimeoutHint(options: Partial<WorkerOptions>): string;
   toWire(image: ImageLike): Promise<{ wire: WireImage; transfer: Transferable[] }>;
   resolveUrl(u: string): string;
   defaults: { modelBase: string; wasmPath: string };
@@ -42,6 +44,8 @@ export interface StartupInfo extends WorkerInfo {
 }
 
 const rand = () => Math.random().toString(16).slice(3, 8);
+/** A worker posts hello as soon as its script runs; a blocked worker (a CSP without blob:) never does. */
+const START_TIMEOUT_MS = 20000;
 let workerCounter = 0;
 let jobCounter = 0;
 let logging = false;
@@ -97,7 +101,19 @@ export function makeApi(main: MainPlatform) {
       for (const p of pending.values()) p.reject(e);
       pending.clear();
     };
+    let hello = false;
+    const startTimer = setTimeout(() => {
+      if (hello) return;
+      state = 'terminated';
+      failAll(new OcrError('WORKER_START_FAILED', main.startTimeoutHint(options)));
+      void transport.terminate();
+    }, START_TIMEOUT_MS);
     transport.onMessage((m) => {
+      if (m.type === 'hello') {
+        hello = true;
+        clearTimeout(startTimer);
+        return;
+      }
       if (m.type === 'progress') return emit(m.id, m.data);
       const p = pending.get(m.id);
       if (!p) return;
@@ -106,6 +122,7 @@ export function makeApi(main: MainPlatform) {
       else p.reject(deserializeError(m.error));
     });
     transport.onError((e) => {
+      clearTimeout(startTimer);
       state = 'terminated';
       failAll(e);
       void transport.terminate();
@@ -129,10 +146,12 @@ export function makeApi(main: MainPlatform) {
     try {
       started = await call<Started>({ type: 'init', id: initJob, options: init });
     } catch (e) {
+      clearTimeout(startTimer);
       state = 'terminated';
       void transport.terminate();
       throw e;
     }
+    clearTimeout(startTimer);
     state = 'ready';
     const info: StartupInfo = { ...started.info, startup: { totalMs: performance.now() - t0, ...started.timings } };
     let params: Record<string, unknown> = {};
@@ -275,6 +294,8 @@ function buildInit(options: Partial<WorkerOptions>, main: MainPlatform): InitOpt
   // Node.js / Deno / Bun: WebAssembly unless asked (Deno has WebGPU; it is opt-in there, not the default)
   const backend = options.backend ?? (main.name === 'node' ? 'wasm' : 'auto');
   if (backend !== 'auto' && backend !== 'wasm') throw new OcrError('INVALID_ARGUMENT', `options.backend must be 'auto' or 'wasm', got ${JSON.stringify(backend)}.`);
+  const recognizer = options.recognizer ?? 'wasm';
+  if (recognizer !== 'wasm' && recognizer !== 'webgpu') throw new OcrError('INVALID_ARGUMENT', `options.recognizer must be 'wasm' or 'webgpu', got ${JSON.stringify(recognizer)}.`);
   const cacheMethod: CacheMethod = options.cacheMethod ?? 'write';
   if (!['write', 'readOnly', 'refresh', 'none'].includes(cacheMethod)) throw new OcrError('INVALID_ARGUMENT', `options.cacheMethod must be 'write', 'readOnly', 'refresh' or 'none', got ${JSON.stringify(cacheMethod)}.`);
   const modelFiles: InitOptions['modelFiles'] = {};
@@ -292,6 +313,7 @@ function buildInit(options: Partial<WorkerOptions>, main: MainPlatform): InitOpt
     modelFiles,
     wasmPath: dir(options.wasmPath ? main.resolveUrl(options.wasmPath) : main.defaults.wasmPath),
     backend,
+    recognizer,
     cacheMethod,
     eager: options.eager === true,
   };

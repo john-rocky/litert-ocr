@@ -76,6 +76,7 @@ function describe(v: unknown): string {
 export const nodeMain: MainPlatform = {
   name: 'node',
   spawn,
+  startTimeoutHint: () => 'The OCR worker thread did not start within 20 s (it sent nothing). Check that dist/node-worker.js is installed next to dist/node.js and that worker_threads are allowed.',
   toWire,
   resolveUrl,
   defaults: { modelBase: MODEL_BASE, wasmPath: '' },

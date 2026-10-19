@@ -51,7 +51,7 @@ if (parts.includes('compat')) {
   // browser: the CDN import is served from dist/ (the package is not published), everything else is real:
   // Hugging Face for the model, jsDelivr for the LiteRT.js runtime, the README's image URL.
   const S = await startServer(0);
-  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-unsafe-webgpu', '--mute-audio'] });
+  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
   try {
     for (const name of ['readme', 'blocks']) {
       const t0 = Date.now();

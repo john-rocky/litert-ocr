@@ -109,6 +109,8 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       loadRec: lazy,
       numThreads: threads,
       backend: o.backend,
+      recognizer: o.recognizer ?? 'wasm',
+      rec320Safe: o.modelFiles.rec320 !== undefined,
       notice,
       progress: (p, step) => send(id, { status: 'initializing model', progress: p, message: step }),
     });
@@ -118,15 +120,21 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       await engine.recognizer(640);
       await engine.recognizer(960);
     }
+    const rb = engine.recBackends;
+    const planned = o.recognizer === 'webgpu' && litert.isWebGPUSupported() ? 'webgpu' : 'wasm';
+    const recognizers = { '320': rb[320], '640': o.eager ? rb[640] : planned, '960': o.eager ? rb[960] : planned } as const;
+    const kinds = new Set(Object.values(recognizers));
     info = {
       detector: engine.detector,
-      recognizer: 'wasm',
+      recognizer: kinds.size > 1 ? 'mixed' : [...kinds][0]!,
+      recognizers,
       threads,
       runtime: `LiteRT.js ${LITERT_VERSION}`,
       model: `${MODEL_NAME} @${MODEL_REVISION.slice(0, 7)}`,
       platform: platform.name,
     };
-    send(id, { status: 'initialized', progress: 1, message: `detector ${info.detector}, recognizer wasm, ${threads} thread${threads === 1 ? '' : 's'}` });
+    const recText = info.recognizer === 'mixed' ? `recognizer 320 ${recognizers['320']} / 640, 960 ${recognizers['640']}` : `recognizer ${info.recognizer}`;
+    send(id, { status: 'initialized', progress: 1, message: `detector ${info.detector}, ${recText}, ${threads} thread${threads === 1 ? '' : 's'}` });
     return info;
   }
 

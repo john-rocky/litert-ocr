@@ -184,6 +184,13 @@ export interface WorkerOptions {
   /** Browser: URL of this package's dist/worker.js to start instead of the built-in blob worker (CSP without blob:). */
   workerPath: string;
   /**
+   * 'wasm' (default): the recognizer runs on WebAssembly, as measured. 'webgpu' (experimental): the 640 / 960
+   * recognizers run on WebGPU (the published files read the same as on WebAssembly with LiteRT.js 2.5.3); the
+   * 320 one only when modelFiles.rec320 replaces the published file, which misreads lines on WebGPU (LiteRT
+   * issue #9661), with one that does not. Falls back to WebAssembly, with a notice, where WebGPU fails.
+   */
+  recognizer: 'wasm' | 'webgpu';
+  /**
    * false (default): the 640 / 960 recognizers (about 21.5 MB each) load the first time a line needs them.
    * true: load all five model files at start (for offline use after the first visit).
    */
@@ -210,8 +217,13 @@ export interface WorkerOptions {
 export interface WorkerInfo {
   /** Where the text detector runs: 'webgpu' or 'wasm'. */
   detector: 'webgpu' | 'wasm';
-  /** The recognizer always runs on WebAssembly (see README: WebGPU misreads it, LiteRT issue #9661). */
-  recognizer: 'wasm';
+  /**
+   * Where the recognizers run: 'wasm' by default (on WebGPU the published 320-wide file misreads lines, LiteRT
+   * issue #9661); 'webgpu' or 'mixed' only with the recognizer option. Per width in `recognizers` (640 / 960
+   * load on first use, so theirs is the plan until then).
+   */
+  recognizer: 'wasm' | 'webgpu' | 'mixed';
+  recognizers: { '320': 'wasm' | 'webgpu'; '640': 'wasm' | 'webgpu'; '960': 'wasm' | 'webgpu' };
   /** WebAssembly threads used (1 when the page is not cross-origin isolated). */
   threads: number;
   runtime: string;

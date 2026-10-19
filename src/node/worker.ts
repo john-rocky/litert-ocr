@@ -14,7 +14,7 @@ import { parentPort } from 'node:worker_threads';
 import * as litert from '@litertjs/core';
 import { OcrError, errText } from '../core/errors.js';
 import { createHandler, type Platform, type Prepared } from '../core/handler.js';
-import { LITERT_FILES, PKG_NAME, type RuntimeVariant } from '../core/models.js';
+import { LITERT_FILES, PKG_NAME, litertPrint, type RuntimeVariant } from '../core/models.js';
 import type { InitOptions, WireImage } from '../core/protocol.js';
 import type { Rectangle } from '../core/types.js';
 import { decodeBytes } from './decode.js';
@@ -66,7 +66,7 @@ const platform: Platform<Raster> = {
         g.ModuleFactory = module.exports;
       };
       if (g.self === undefined) g.self = globalThis;
-      g.Module = { wasmBinary: wasm, locateFile: (p: string) => join(wasmDir, p) };
+      g.Module = { ...litertPrint, wasmBinary: wasm, locateFile: (p: string) => join(wasmDir, p) };
       try {
         await litert.loadLiteRt(pathToFileURL(wasmDir + '/').href, useThreads ? { threads: true } : {});
       } finally {
@@ -192,3 +192,4 @@ if (!parentPort) throw new Error('litert-ocr: dist/node-worker.js runs as a work
 const port = parentPort;
 const handler = createHandler(platform, (msg) => port.postMessage(msg));
 port.on('message', handler);
+port.postMessage({ type: 'hello' });

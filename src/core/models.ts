@@ -67,3 +67,9 @@ export const modelInfo = {
   files: MODEL_ROLES.map((role) => ({ role, ...MODEL_FILES[role] })),
   runtime: { package: '@litertjs/core', version: LITERT_VERSION, base: LITERT_WASM_BASE, files: Object.values(LITERT_FILES).flatMap((v) => [v.js, v.wasm]) },
 };
+
+/** Emscripten print hooks: drop LiteRT's start-up INFO lines and the NPU registry warning, keep the rest. */
+export const litertPrint = {
+  print: (s: string) => { if (!/^(INFO|VERBOSE):/.test(s)) console.log(s); },
+  printErr: (s: string) => { if (!/^(INFO|VERBOSE):/.test(s) && !s.includes('NPU accelerator could not be loaded')) console.warn(s); },
+};

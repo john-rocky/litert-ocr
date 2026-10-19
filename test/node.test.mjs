@@ -116,9 +116,10 @@ describe('node: reading', () => {
     const d = await worker.recognize(join(FIX, 'mobile.png'));
     await worker.setParameters({ tessedit_char_whitelist: '' });
     assert.match(d.data.text, /^[0-9\n]+$/);
-    const one = await worker.recognize(join(FIX, 'dialog-shared.jpg'), { rectangle: { left: 280, top: 0, width: 600, height: 60 }, tessedit_pageseg_mode: PSM.SINGLE_LINE });
+    // one text line (the GT box of "Edit profile" with a margin), read without detection
+    const one = await worker.recognize(join(FIX, 'dialog-shared.jpg'), { rectangle: { left: 398, top: 82, width: 96, height: 28 }, tessedit_pageseg_mode: PSM.SINGLE_LINE });
     report.singleLine = one.data.text;
-    assert.ok(one.data.text.trim().length > 0);
+    assert.equal(one.data.text.trim(), 'Edit profile');
   });
 
   test('an image over 4096 px is read scaled down, boxes in original pixels', async () => {
