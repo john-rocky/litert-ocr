@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>blocks output</title>
+<pre id="out">reading…</pre>
+<script type="module">
+import { createWorker } from 'https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm';
+
+(async () => {
+  const worker = await createWorker('eng');
+  const { data } = await worker.recognize('../fixtures/settings-dark.png', {}, { blocks: true });
+  const rows = [];
+  for (const block of data.blocks) {
+    for (const paragraph of block.paragraphs) {
+      for (const line of paragraph.lines) {
+        for (const word of line.words) rows.push(`${word.text} ${Math.round(word.confidence)} ${JSON.stringify(word.bbox)}`);
+      }
+    }
+  }
+  document.getElementById('out').textContent = rows.join('\n');
+  window.__result = { words: rows.length, first: rows.slice(0, 5), info: worker.info };
+  await worker.terminate();
+})().catch((e) => { window.__result = { error: e.code + ': ' + e.message }; });
+</script>
+</html>

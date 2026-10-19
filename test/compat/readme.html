@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>tesseract.js README example, one line changed</title>
+<pre id="out">reading…</pre>
+<script type="module">
+// tesseract.js README example; only the import line differs (the CDN URL is served locally by the test).
+import { createWorker } from 'https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm';
+
+(async () => {
+  const worker = await createWorker('eng');
+  const ret = await worker.recognize('https://tesseract.projectnaptha.com/img/eng_bw.png');
+  console.log(ret.data.text);
+  document.getElementById('out').textContent = ret.data.text;
+  window.__result = { text: ret.data.text, info: worker.info };
+  await worker.terminate();
+})().catch((e) => { window.__result = { error: e.code + ': ' + e.message }; });
+</script>
+</html>

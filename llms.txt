@@ -1,0 +1,20 @@
+# litert-ocr
+
+> OCR for photos and screenshots in the browser and in Node.js, Deno and Bun, with the same API as tesseract.js 7 (createWorker, worker.recognize, worker.terminate). PP-OCRv6-Small on LiteRT.js: the text detector runs on WebGPU when the browser has it, the recognizer on WebAssembly; images stay on the device. Independent project, not affiliated with Google.
+
+```js
+import { createWorker } from 'litert-ocr';   // was: from 'tesseract.js'
+const worker = await createWorker('eng');
+const { data } = await worker.recognize(image); // URL, File, Blob, <img>, <canvas>, ImageBitmap, ImageData, Buffer, file path
+console.log(data.text);
+await worker.terminate();
+```
+
+## Start here
+
+- [README](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/README.md): install, the one-line switch from tesseract.js and what differs, options, output formats, model and runtime files, threads (COOP / COEP), errors and their next steps, measured speed with device and date.
+- [AGENTS.md](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/AGENTS.md): for coding agents. Task → API → file.
+- [examples/html/index.html](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/html/index.html): plain HTML with the CDN import.
+- [examples/react-vite/src/App.jsx](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/react-vite/src/App.jsx): React with Vite.
+- [examples/nextjs/app/ocr.jsx](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/nextjs/app/ocr.jsx): Next.js App Router client component.
+- [src/core/types.ts](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/src/core/types.ts): every option and result field, documented.

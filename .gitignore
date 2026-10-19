@@ -1,0 +1,16 @@
+# installs, build output, caches and model files stay local
+node_modules/
+dist/
+.cache/
+.models/
+*.tflite
+*.wasm
+test/out/
+examples/*/node_modules/
+examples/*/dist/
+examples/*/.next/
+examples/*/next-env.d.ts
+examples/*/package-lock.json
+*.log
+.DS_Store
+examples/.pack/

@@ -1,0 +1,18 @@
+litert-ocr
+Copyright 2026 john-rocky
+
+This product includes software developed by The Google AI Edge Authors
+(https://github.com/google-ai-edge/litert-samples):
+
+  src/core/ink.ts: the functions columnInkProfile, splitByInk, windowSeparator and the CJK_EDGE pattern
+  are copied from samples/web_demos/chrome_extension/src-ocr/ocr-pipeline.js (Apache License 2.0,
+  "Copyright 2026 The Google AI Edge Authors") and ported to TypeScript with the logic unchanged. The
+  file keeps that license header.
+
+Components used at run time (not part of this package's source; installed or downloaded separately):
+
+  - LiteRT.js, npm @litertjs/core 2.5.3 (Apache License 2.0).
+  - The PP-OCRv6-Small model files from Hugging Face litert-community/PP-OCRv6-Small-LiteRT, revision
+    a9b2febf2022fdd48ac2b5522115d6db3f8e214e (Apache License 2.0): converted from PaddlePaddle PP-OCRv6
+    Small (Apache License 2.0); the repository's THIRD_PARTY_NOTICES.md lists the sources.
+  - pngjs (MIT) and jpeg-js (BSD-3-Clause), which the Node.js build uses to decode images.

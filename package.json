@@ -1,0 +1,50 @@
+{
+  "name": "litert-ocr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OCR for photos and screenshots in the browser and Node.js, with the same API as tesseract.js: PP-OCRv6-Small on LiteRT.js (WebGPU or WebAssembly).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/node.js",
+  "browser": "./dist/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "browser": "./dist/index.js",
+      "node": "./dist/node.js",
+      "default": "./dist/index.js"
+    },
+    "./worker.js": "./dist/worker.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "AGENTS.md",
+    "llms.txt",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node test/run.mjs",
+    "test:node": "node test/run.mjs node",
+    "test:browser": "node test/run.mjs browser"
+  },
+  "dependencies": {
+    "@litertjs/core": "2.5.3",
+    "jpeg-js": "0.4.4",
+    "pngjs": "7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "esbuild": "0.28.2",
+    "playwright": "1.62.1",
+    "typescript": "5.9.3"
+  }
+}

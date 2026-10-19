@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OCR in the browser</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 760px; }
+    pre { white-space: pre-wrap; background: #f4f4f5; padding: 12px; border-radius: 6px; }
+    #status { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Read text from an image</h1>
+  <p>Pick a photo or a screenshot. It is read in this tab; nothing is uploaded.</p>
+  <input type="file" id="uploader" accept="image/*" multiple>
+  <p id="status">Loading the model…</p>
+  <pre id="out"></pre>
+  <script type="module">
+    // tesseract.js: import { createWorker } from 'https://cdn.jsdelivr.net/npm/tesseract.js@7/dist/tesseract.esm.min.js';
+    import { createWorker } from 'https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm';
+
+    const status = document.getElementById('status');
+    const out = document.getElementById('out');
+
+    // A worker is created once and used every time a user picks a new file.
+    const worker = await createWorker('eng', 1, {
+      logger: (m) => {
+        if (m.status === 'loading model') status.textContent = `Loading the model… ${Math.round(m.progress * 100)}%`;
+        if (m.status === 'initialized') status.textContent = `Ready (${m.message}).`;
+        if (m.status === 'notice') console.warn(m.message);
+      },
+    });
+
+    document.getElementById('uploader').addEventListener('change', async (evt) => {
+      for (const file of evt.target.files) {
+        status.textContent = `Reading ${file.name}…`;
+        const t0 = performance.now();
+        const ret = await worker.recognize(file);
+        out.textContent = ret.data.text;
+        status.textContent = `${file.name}: ${Math.round(performance.now() - t0)} ms (${worker.info.detector} detector, ${worker.info.threads} threads).`;
+      }
+    });
+  </script>
+</body>
+</html>

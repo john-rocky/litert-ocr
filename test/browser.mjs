@@ -1,0 +1,97 @@
+// Browser tests in headless Chrome (Playwright). Modes:
+//   webgpu  Google Chrome (channel 'chrome', new headless): detector on WebGPU, recognizer on WebAssembly
+//   wasm    Chrome with the GPU disabled (no WebGPU adapter): everything on WebAssembly (the fallback path)
+// usage: node test/browser.mjs <webgpu|wasm> [outfile.json]
+import { writeFileSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { startServer } from './server.mjs';
+
+const mode = process.argv[2] ?? 'webgpu';
+const outFile = process.argv[3];
+const S = await startServer(0);
+const S2 = await startServer(0); // a second origin for the cross-origin cases
+const origin = `http://127.0.0.1:${S.port}`;
+const otherOrigin = `http://127.0.0.1:${S2.port}`;
+const args = mode === 'wasm' ? ['--disable-gpu', '--disable-features=WebGPU,Vulkan', '--mute-audio'] : ['--enable-unsafe-webgpu', '--mute-audio'];
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args });
+const results = [];
+const chromeVersion = browser.version();
+const consoleLog = {};
+const t0 = Date.now();
+
+async function open(prefix, setup) {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const consoleLines = [];
+  page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text()}`.slice(0, 400)));
+  page.on('pageerror', (e) => consoleLines.push(`pageerror: ${e.message}`));
+  if (setup) await setup(context, page);
+  await page.goto(`${origin}/${prefix}/test/browser/page.html`);
+  await page.waitForFunction(() => window.testsReady === true, null, { timeout: 30000 });
+  return { context, page, consoleLines };
+}
+
+async function run(page, name, cfg = {}, timeout = 240000) {
+  const start = Date.now();
+  let r;
+  try {
+    r = await page.evaluate(({ name, cfg }) => window.tests[name](cfg), { name, cfg }, { timeout });
+  } catch (e) {
+    r = { ok: false, error: String(e?.message ?? e).slice(0, 1500) };
+  }
+  r = { name, mode, ms: Date.now() - start, ...r };
+  results.push(r);
+  console.log(`${r.ok ? 'PASS' : 'FAIL'} ${mode} ${name} (${r.ms} ms)${r.ok ? '' : ' ' + JSON.stringify(r).slice(0, 600)}`);
+  return r;
+}
+
+try {
+  // cross-origin isolated page: the main cases
+  const main = await open('coi');
+  const env = await run(main.page, 'env');
+  const wantDet = mode === 'webgpu' ? 'webgpu' : 'wasm';
+  // wasm mode: the WebGPU fallback is a logger notice, not an error
+  const fallbackNoticed = mode === 'webgpu' || (env.notices ?? []).some((n) => /WebGPU/.test(n) && /WebAssembly/.test(n));
+  results.push({ name: 'backend', mode, ok: env.info?.detector === wantDet && env.info?.threads > 1 && fallbackNoticed && /threads/.test(env.initialized ?? ''), want: wantDet, info: env.info, initialized: env.initialized, notices: env.notices });
+  console.log(`${results.at(-1).ok ? 'PASS' : 'FAIL'} ${mode} backend detector=${env.info?.detector} threads=${env.info?.threads}`);
+  await run(main.page, 'moduleWorkerProbe');
+  for (const name of ['fixtures', 'outputs', 'inputs', 'rectangle', 'whitelist', 'singleLine', 'bigImage', 'scheduler', 'oldRecognize', 'langs', 'logger']) await run(main.page, name);
+  for (const name of ['failModel404', 'failSha256', 'failWasm404', 'failDecode', 'failType', 'failImage404', 'failRectangle', 'failTerminated', 'failErrorHandler', 'failDetectAndOutputs', 'forcedWasm']) await run(main.page, name);
+  await run(main.page, 'failCrossOriginFetch', { otherOrigin });
+  consoleLog.main = main.consoleLines.slice(0, 120);
+  await main.context.close();
+
+  // blocked defaults (Hugging Face and jsDelivr unreachable)
+  const blocked = await open('coi', async (ctx) => {
+    await ctx.route(/huggingface\.co|jsdelivr\.net/, (r) => r.abort('blockedbyclient'));
+  });
+  await run(blocked.page, 'failDefaultBlocked');
+  await blocked.context.close();
+
+  // offline
+  const off = await open('coi');
+  await off.context.setOffline(true);
+  await run(off.page, 'failOffline');
+  await off.context.close();
+
+  // not cross-origin isolated: 1 thread and the notice; a tainted cross-origin <img>
+  const plain = await open('plain');
+  await run(plain.page, 'noCoi');
+  await run(plain.page, 'failTaintedImage', { otherOrigin });
+  await plain.context.close();
+
+  // CSP without blob: workers
+  const csp = await open('csp');
+  await run(csp.page, 'cspBlob');
+  await csp.context.close();
+} finally {
+  await browser.close();
+  await S.close();
+  await S2.close();
+}
+
+const pass = results.filter((r) => r.ok).length;
+const summary = { mode, pass, total: results.length, seconds: Math.round((Date.now() - t0) / 1000), chrome: chromeVersion };
+console.log(`BROWSER ${mode}: ${pass}/${results.length} PASS`);
+if (outFile) writeFileSync(outFile, JSON.stringify({ summary, results, console: consoleLog }, null, 1));
+process.exit(pass === results.length ? 0 : 1);
