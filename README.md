@@ -1,8 +1,10 @@
 # litert-ocr
 
-OCR for photos and screenshots in the browser and in Node.js, with the tesseract.js API; TODO-MEASURE-SEAT.
+OCR for photos and screenshots in the browser and in Node.js with the tesseract.js API; on a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 259 ms (median of 185 English and Japanese photos and screenshots, 2026-10-20).
 
 It runs PP-OCRv6-Small with LiteRT.js. In the browser the text detector runs on WebGPU when the browser has it and the recognizer on WebAssembly, inside a Web Worker; in Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
+
+Status: v0. Tested in Chrome 155 on macOS (WebGPU and WebAssembly), Node.js 24, Deno 2.9 and Bun 1.4; Safari, Firefox and phones are not tested yet.
 
 ```js
 import { createWorker } from 'litert-ocr';
@@ -30,14 +32,14 @@ Change the import; the calls and the result shape stay the same:
 + import { createWorker } from 'litert-ocr';
 ```
 
-`require('litert-ocr')` works too (Node.js 20.19+ / 22.12+ load this ES module from CommonJS).
+`require('litert-ocr')` works too (tested with Node.js 24; Node.js loads ES modules from CommonJS since 20.19 and 22.12).
 
 What differs:
 
 | | tesseract.js 7 | litert-ocr |
 |---|---|---|
 | Languages | one data file per language (`'eng'`, `'jpn'`, `'eng+jpn'`) | one model reads Latin-script, Greek, Chinese and Japanese text. `langs` is checked but picks nothing. Korean, Cyrillic, Arabic, Hebrew, Thai and Indic scripts are not covered: `createWorker('kor')` rejects with `LANG_NOT_SUPPORTED` |
-| `oem`, `corePath`, `langPath`, `legacyCore`, `gzip` | engine and data options | accepted and ignored (a notice says so) |
+| `oem`, `corePath`, `langPath`, `legacyCore`, `gzip` | engine and data options | accepted and ignored (the path options get a notice) |
 | `setParameters` | every Tesseract parameter | `tessedit_char_whitelist`, `tessedit_char_blacklist`, and `tessedit_pageseg_mode` `SINGLE_LINE` / `SINGLE_WORD` / `RAW_LINE` / `SINGLE_CHAR` (read the image as one line, no detection). Others are ignored; the result lists them |
 | Output | `text`, `blocks`, `hocr`, `tsv`, `box`, `unlv`, `osd`, `pdf`, images | `text`, `blocks`, `hocr`, `tsv`. The other formats are `null` |
 | Layout | Tesseract's blocks and paragraphs | one block with one paragraph; one line per detected text line, in reading order (top to bottom, left to right). A table row or a label and its value can come out as separate lines |
@@ -53,9 +55,27 @@ PP-OCRv6-Small (Hugging Face [litert-community/PP-OCRv6-Small-LiteRT](https://hu
 
 Each detected line is read upright: the image is stretched to 640 x 640 for detection, each line is cut out along its box (tall lines are turned a quarter turn) and read at a height of 48 pixels. Lines the recognizer is not sure of (mean character probability under 0.5) are dropped.
 
-## Speed and size
+## Speed and accuracy
 
-TODO-MEASURE-SPEED
+Measured on a Mac Studio (Apple M4 Max), Chrome 155 headless, detector on WebGPU, recognizer on WebAssembly with 12 threads. Time (2026-10-20) = from handing over the image file to the text, with the model loaded. Character error rate (2026-10-19, with the same pipeline; this library reads the same lines and boxes on all 295 images) = the edits between the lines read and the reference lines, matched by their boxes, per reference character; lower is better.
+
+| Images | Count | Median time | Character error rate |
+|---|---|---|---|
+| English photos (TextOCR validation set) | 68 | 84 ms | 0.267 |
+| Japanese photos of signs (JaWildText) | 24 | 362 ms | 0.305 |
+| English screenshots (rendered for this test) | 44 | 327 ms | 0.006 |
+| Japanese screenshots (rendered for this test) | 50 | 338 ms | 0.014 |
+| Receipts (CORD) | 74 | 133 ms | 0.100 |
+| English book pages (typeset, A4 150 dpi) | 20 | 885 ms | 0.008 |
+| Japanese book pages (typeset, A4 150 dpi) | 15 | 893 ms | 0.003 |
+
+First and second visit (2026-10-20, same Mac and Chrome; the model from Hugging Face and the runtime from jsDelivr, as by default; time = from opening the page to the first text):
+
+| Image | First visit (nothing cached) | Downloaded | Second visit (cached) |
+|---|---|---|---|
+| Phone screenshot, 390 x 800 | 5.5 s | 58 MB | 0.9 s |
+| Chat screenshot, 900 x 800 (long lines: needs the 640 and 960 recognizers) | 6.2 s | 80 MB | 1.5 s |
+| Same two with `eager: true` (all five model files at start) | 5.0 s / 5.1 s | 80 MB | 1.0 s / 1.2 s |
 
 The browser needs cross-origin isolation for WebAssembly threads: serve the page with
 
@@ -74,7 +94,7 @@ All files are pinned: a fixed revision on Hugging Face and on jsDelivr, each che
 
 | File | Bytes | When |
 |---|---|---|
-| LiteRT.js 2.5.3 runtime (`litert_wasm_threaded_internal.js` + `.wasm`) | 9,763,309 | at start (browser; Node.js reads it from `node_modules`) |
+| LiteRT.js 2.5.3 runtime (`litert_wasm_threaded_internal.js` + `.wasm`; jsDelivr sends it compressed, about 2.7 MB) | 9,763,309 | at start (browser; Node.js reads it from `node_modules`) |
 | `ppocrv6_small_det_640_fp32.tflite` (detector) | 12,380,664 | at start |
 | `ppocrv6_small_rec_320_fp32.tflite` (recognizer, lines up to 320 px wide at height 48) | 21,477,068 | at start |
 | `characters.json` | 168,510 | at start |

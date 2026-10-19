@@ -46,7 +46,8 @@ async function run(page, name, cfg = {}, timeout = 180000) {
   } catch (e) {
     r = { ok: false, error: String(e?.message ?? e).slice(0, 1500) };
   }
-  r = { name, mode, ms: Date.now() - start, ...r };
+  // keep the case name (an expected error carries its own name: OcrError)
+  r = { ...r, errorName: r.name, name, mode, ms: Date.now() - start };
   results.push(r);
   console.log(`${r.ok ? 'PASS' : 'FAIL'} ${mode} ${name} (${r.ms} ms)${r.ok ? '' : ' ' + JSON.stringify(r).slice(0, 600)}`);
   return r;

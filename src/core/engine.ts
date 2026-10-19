@@ -51,6 +51,15 @@ export class Engine {
 
   private constructor(private readonly init: EngineInit) {}
 
+  /** WebGPU can run here: the API exists and LiteRT.js opened a device for it (a browser without a GPU has the API but no device). */
+  get gpuUsable(): boolean {
+    try {
+      return this.init.litert.isWebGPUSupported() && this.init.litert.getWebGpuDevice() != null;
+    } catch {
+      return false;
+    }
+  }
+
   static async create(init: EngineInit): Promise<Engine> {
     const e = new Engine(init);
     await e.start();
@@ -94,7 +103,7 @@ export class Engine {
     this.recs.set(320, await this.compileRec(320, this.init.rec320));
     this.init.progress(0.5, 'detector');
     let det: Compiled | null = null;
-    if (this.init.backend !== 'wasm' && litert.isWebGPUSupported()) {
+    if (this.init.backend !== 'wasm' && this.gpuUsable) {
       try {
         det = await this.compile('det', this.init.det, 'webgpu');
         const acc = (det as { options?: { accelerator?: string } }).options?.accelerator ?? 'webgpu';
@@ -126,7 +135,7 @@ export class Engine {
   private async compileRec(width: RecWidth, bytes: Uint8Array): Promise<Compiled> {
     const role = `rec${width}` as ModelRole;
     const shape = [1, 3, REC_H, width];
-    const gpu = this.init.recognizer === 'webgpu' && this.init.litert.isWebGPUSupported() && (width !== 320 || this.init.rec320Safe === true);
+    const gpu = this.init.recognizer === 'webgpu' && this.gpuUsable && (width !== 320 || this.init.rec320Safe === true);
     if (gpu) {
       try {
         const m = await this.compile(role, bytes, 'webgpu');
@@ -139,7 +148,7 @@ export class Engine {
       } catch (e) {
         this.init.notice(`WebGPU could not run the ${width}-wide recognizer (${errText(e)}); it runs on WebAssembly.`);
       }
-    } else if (this.init.recognizer === 'webgpu' && !this.init.litert.isWebGPUSupported() && width === 320) {
+    } else if (this.init.recognizer === 'webgpu' && !this.gpuUsable && width === 320) {
       this.init.notice('WebGPU is not available here; the recognizer runs on WebAssembly.');
     }
     const m = await this.compile(role, bytes, 'wasm');
@@ -200,7 +209,11 @@ export class Engine {
   }
 
   read<Src, Crop, Strip>(src: Src, ops: RasterOps<Src, Crop, Strip>, opts: ReadOptions) {
-    return readPage(src, ops, this.runners, this.chars, opts);
+    const prefetch = (widths: RecWidth[]) => {
+      // start every missing width now, in parallel; a failure surfaces when the width is used
+      for (const w of widths) if (!this.recs.has(w)) this.recognizer(w).catch(() => {});
+    };
+    return readPage(src, ops, this.runners, this.chars, { ...opts, prefetch });
   }
 
   dispose(): void {

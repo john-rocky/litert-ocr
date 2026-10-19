@@ -58,4 +58,5 @@ export function deserializeError(s: SerializedError): OcrError {
   return new OcrError(s.code, s.message, extra);
 }
 
-export const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+/** The message of an error, without a final period (callers add their own punctuation). */
+export const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)).replace(/\.+\s*$/, '');

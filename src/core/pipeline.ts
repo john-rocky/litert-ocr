@@ -54,6 +54,8 @@ export interface ReadLine {
 }
 
 export interface ReadOptions {
+  /** Called once after detection with the recognizer widths the lines will need (to start loading them early). */
+  prefetch?: (widths: RecWidth[]) => void;
   whitelist: string | null;
   blacklist: string | null;
   /** Read the whole source as one line (no detection). */
@@ -98,6 +100,7 @@ export async function readPage<Src, Crop, Strip>(
       q.quad.map(([x, y]) => [Math.min(W, Math.max(0, Math.round(x / sx))), Math.min(H, Math.max(0, Math.round(y / sy)))] as Point) as Quad,
     );
   }
+  opts.prefetch?.([...new Set(quads.flatMap(widthsFor))]);
   const minScore = opts.singleLine ? 0 : MIN_SCORE;
   const lines: ReadLine[] = [];
   let recMs = 0;
@@ -121,6 +124,19 @@ export async function readPage<Src, Crop, Strip>(
   }
   opts.onLine?.(quads.length, quads.length);
   return { lines, detMs, recMs };
+}
+
+/** Recognizer widths a quad will use: its crop at height 48 (as cropQuad sizes it), split above 960. */
+function widthsFor(quad: Quad): RecWidth[] {
+  const [p0, p1, p2, p3] = quad;
+  const d = (a: Point, b: Point) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  let w = Math.max(1, Math.floor(Math.max(d(p0, p1), d(p2, p3))));
+  let h = Math.max(1, Math.floor(Math.max(d(p0, p3), d(p1, p2))));
+  if (h / w >= 1.5) [w, h] = [h, w];
+  const nat = Math.max(1, Math.ceil((REC_H * w) / h));
+  if (nat <= 320) return [320];
+  if (nat <= 640) return [640];
+  return nat <= MAX_REC_W ? [960] : [640, 960];
 }
 
 async function readCrop<Src, Crop, Strip>(

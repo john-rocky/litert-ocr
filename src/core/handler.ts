@@ -80,16 +80,21 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     const specs = startRoles.map(specOf);
     const total = specs.reduce((s, f) => s + (f.bytes ?? 0), 0);
     const got: Partial<Record<ModelRole, Uint8Array>> = {};
-    let before = 0;
-    for (let i = 0; i < startRoles.length; i++) {
-      const spec = specs[i]!;
-      const base = before;
-      got[startRoles[i]!] = await fetchVerified(
-        spec,
-        makeCtx('modelBase', (loaded, _t, fromCache) => send(id, { status: 'loading model', progress: total ? Math.min(1, (base + loaded) / total) : 0, file: spec.name, loaded: base + loaded, total, fromCache })),
-      );
-      before += got[startRoles[i]!]!.byteLength;
-    }
+    // in parallel; one progress stream over the bytes of all of them
+    const loadedBy = new Array<number>(specs.length).fill(0);
+    const bytes = await Promise.all(
+      specs.map((spec, i) =>
+        fetchVerified(
+          spec,
+          makeCtx('modelBase', (loaded, _t, fromCache) => {
+            loadedBy[i] = loaded;
+            const sum = loadedBy.reduce((a, b) => a + b, 0);
+            send(id, { status: 'loading model', progress: total ? Math.min(1, sum / total) : 0, file: spec.name, loaded: sum, total, fromCache });
+          }),
+        ),
+      ),
+    );
+    startRoles.forEach((role, i) => { got[role] = bytes[i]!; });
     const lazy = async (width: 640 | 960): Promise<Uint8Array> => {
       const role = `rec${width}` as ModelRole;
       if (got[role]) {
@@ -121,7 +126,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       await engine.recognizer(960);
     }
     const rb = engine.recBackends;
-    const planned = o.recognizer === 'webgpu' && litert.isWebGPUSupported() ? 'webgpu' : 'wasm';
+    const planned = o.recognizer === 'webgpu' && engine.gpuUsable ? 'webgpu' : 'wasm';
     const recognizers = { '320': rb[320], '640': o.eager ? rb[640] : planned, '960': o.eager ? rb[960] : planned } as const;
     const kinds = new Set(Object.values(recognizers));
     info = {

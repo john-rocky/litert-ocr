@@ -140,7 +140,8 @@ export function describe(v: unknown): string {
   if (v === null) return 'null';
   if (v === undefined) return 'undefined';
   if (typeof v !== 'object') return `a ${typeof v} (${String(v).slice(0, 40)})`;
-  return `a ${(v as object).constructor?.name ?? 'plain'} object`;
+  const name = (v as object).constructor?.name;
+  return !name || name === 'Object' ? 'a plain object' : `a ${name}`;
 }
 
 export const browserMain: MainPlatform = {
