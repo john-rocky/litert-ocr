@@ -2,7 +2,7 @@
   "name": "litert-ocr",
   "version": "0.1.0",
   "private": true,
-  "description": "OCR for photos and screenshots in the browser and Node.js, with the same API as tesseract.js: PP-OCRv6-Small on LiteRT.js (WebGPU or WebAssembly).",
+  "description": "OCR and documents to Markdown in the browser and Node.js: the tesseract.js API for photos and screenshots, PDFs and scans to Markdown with tables, JSON or text, a CLI and an MCP server; PP-OCRv6-Small and a page layout model on LiteRT.js (WebGPU or WebAssembly).",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/node.js",
@@ -15,8 +15,17 @@
       "node": "./dist/node.js",
       "default": "./dist/index.js"
     },
+    "./extract": {
+      "types": "./dist/types/extract/browser.d.ts",
+      "browser": "./dist/extract.js",
+      "node": "./dist/extract-node.js",
+      "default": "./dist/extract.js"
+    },
     "./worker.js": "./dist/worker.js",
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "litert-ocr": "./dist/cli.js"
   },
   "files": [
     "dist",
@@ -39,9 +48,24 @@
   "dependencies": {
     "@litertjs/core": "2.5.3",
     "jpeg-js": "0.4.4",
+    "pdfjs-dist": "6.4.299",
     "pngjs": "7.0.0"
   },
+  "optionalDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@napi-rs/canvas": "1.0.11",
+    "zod": "3.25.76"
+  },
+  "peerDependencies": {
+    "@litert-lm/core": "0.19.0-nightly.20261018"
+  },
+  "peerDependenciesMeta": {
+    "@litert-lm/core": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@litert-lm/core": "0.19.0-nightly.20261018",
     "@types/node": "24.19.2",
     "esbuild": "0.28.2",
     "playwright": "1.62.1",

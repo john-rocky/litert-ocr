@@ -14,7 +14,20 @@ export type OcrErrorCode =
   | 'IMAGE_CROSS_ORIGIN'
   | 'LANG_NOT_SUPPORTED'
   | 'INVALID_ARGUMENT'
-  | 'INTERNAL';
+  | 'INTERNAL'
+  // documents (convert, toMarkdown, the CLI and the MCP server)
+  | 'DOC_UNSUPPORTED_TYPE'
+  | 'DOC_TOO_MANY_PAGES'
+  | 'PDF_INVALID'
+  | 'PDF_PASSWORD'
+  | 'PDF_UNAVAILABLE'
+  | 'PDF_RENDER_FAILED'
+  // extract (litert-ocr/extract)
+  | 'LLM_UNAVAILABLE'
+  | 'LLM_WEBGPU_UNAVAILABLE'
+  | 'LLM_MODEL_FETCH_FAILED'
+  | 'LLM_FAILED'
+  | 'SCHEMA_INVALID';
 
 export interface SerializedError {
   name: string;

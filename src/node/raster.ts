@@ -158,6 +158,32 @@ function copyColumns(s: Raster, from: number, cw: number): Raster {
   return out;
 }
 
+/** Page steps of convert() in plain JS: the page scaled (bilinear, as for the detector input) and turned back. */
+export const jsDocOps = {
+  scaled: (r: Raster, w: number, h: number): Uint8ClampedArray => resizeBilinear(r, w, h).data,
+  /** The page turned by -deg about its centre (bilinear) on white, same size. */
+  async rotate(src: Raster, deg: number): Promise<{ src: Raster; release(): void }> {
+    const W = src.width, H = src.height;
+    const out = newRaster(W, H);
+    const a = (deg * Math.PI) / 180;
+    const cos = Math.cos(a), sin = Math.sin(a);
+    const cx = W / 2, cy = H / 2;
+    const px = [0, 0, 0, 0];
+    const d = out.data;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        // destination pixel centre turned by +deg back into the source
+        const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+        const sx = cx + dx * cos - dy * sin, sy = cy + dx * sin + dy * cos;
+        sample(src, sx, sy, px);
+        const o = (y * W + x) * 4, al = px[3]! / 255;
+        d[o] = px[0]! * al + 255 * (1 - al); d[o + 1] = px[1]! * al + 255 * (1 - al); d[o + 2] = px[2]! * al + 255 * (1 - al); d[o + 3] = 255;
+      }
+    }
+    return { src: out, release: () => {} };
+  },
+};
+
 /** Crop and/or scale for a rectangle and the size limit. */
 export function cropScale(src: Raster, sx: number, sy: number, sw: number, sh: number, scale: number): Raster {
   if (scale === 1) {

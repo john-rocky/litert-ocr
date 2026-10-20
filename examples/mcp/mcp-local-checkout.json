@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "litert-ocr": {
+      "command": "node",
+      "args": ["/path/to/litert-ocr/dist/cli.js", "mcp", "--layout-model-base", "/path/to/layout-model-files"]
+    }
+  }
+}

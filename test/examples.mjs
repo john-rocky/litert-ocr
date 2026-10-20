@@ -1,7 +1,8 @@
-// Build the three examples against a packed tarball of this repository and read one image in each with
-// headless Chrome (file picker driven by Playwright). Logs go to $LOG_DIR (default test/out/).
-//   node test/examples.mjs [html|react-vite|nextjs ...]
-import { spawn, spawnSync } from 'node:child_process';
+// Build the examples against a packed tarball of this repository and read one image (one PDF and one scan in the
+// pdf-to-markdown example) in each with headless Chrome (file picker driven by Playwright). Logs go to $LOG_DIR
+// (default test/out/).
+//   node test/examples.mjs [html|pdf|react-vite|nextjs ...]
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import { startServer } from './server.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const LOG = process.env.LOG_DIR ?? join(ROOT, 'test/out');
 mkdirSync(LOG, { recursive: true });
-const which = process.argv.slice(2).length ? process.argv.slice(2) : ['html', 'react-vite', 'nextjs'];
+const which = process.argv.slice(2).length ? process.argv.slice(2) : ['html', 'pdf', 'react-vite', 'nextjs'];
 const FIXTURE = join(ROOT, 'test/fixtures/dialog-shared.jpg');
 const results = [];
 
@@ -50,6 +51,40 @@ async function readOne(url, label, route) {
   }
 }
 
+// examples/pdf-to-markdown: a PDF with a text layer, then a scanned page (OCR), through the page's file picker
+async function readPdfExample(url) {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
+  const t0 = Date.now();
+  try {
+    const context = await browser.newContext();
+    await context.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }, body: readFileSync(join(ROOT, 'dist/index.js')) }));
+    const page = await context.newPage();
+    const lines = [];
+    page.on('console', (m) => lines.push(`${m.type()}: ${m.text()}`.slice(0, 300)));
+    page.on('pageerror', (e) => lines.push(`pageerror: ${e.message}`));
+    await page.goto(url);
+    await page.waitForFunction(() => /Ready/.test(document.getElementById('status')?.textContent ?? ''), null, { timeout: 60000 });
+    const read = async (file, done) => {
+      await page.setInputFiles('input[type=file]', file);
+      await page.waitForFunction((name) => new RegExp(`^${name}: \\d+ page`).test(document.getElementById('status')?.textContent ?? '') || /error|: [A-Z_]+:/.test(document.getElementById('status')?.textContent ?? ''), file.split('/').pop(), { timeout: 300000 });
+      return { out: await page.textContent('#out'), status: await page.textContent('#status'), done };
+    };
+    const a = await read(join(ROOT, 'test/out/fixtures/report.pdf'));
+    const b = await read(join(ROOT, 'test/out/fixtures/scan.jpg'));
+    const ok = /^# Harbor Library Monthly Report$/m.test(a.out) && /\| Branch \| Visitors \| Loans \|/.test(a.out) && /Harbor Library Monthly Report/.test(b.out) && /OCR/.test(b.status);
+    const r = { example: 'pdf-to-markdown (CDN)', ok, pdf: a.status, image: b.status, chrome: browser.version(), seconds: Math.round((Date.now() - t0) / 1000), md: a.out.split('\n').slice(0, 10), ocr: b.out.split('\n').slice(0, 10), console: lines.slice(0, 30) };
+    results.push(r);
+    console.log(`${ok ? 'PASS' : 'FAIL'} example pdf-to-markdown: ${a.status} | ${b.status}`);
+    return r;
+  } finally {
+    await browser.close();
+  }
+}
+
+if (which.includes('pdf')) {
+  execFileSync(process.execPath, ['test/fixtures/make-pdfs.mjs'], { cwd: ROOT, stdio: 'inherit' });
+}
 mkdirSync(join(ROOT, 'examples/.pack'), { recursive: true });
 sh('pack', 'npm', ['pack', '--pack-destination', 'examples/.pack'], ROOT);
 const S = await startServer(0, { extraRoots: { '/ex-react/': join(ROOT, 'examples/react-vite/dist/') } });
@@ -60,6 +95,9 @@ try {
       ctx.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm', (route) =>
         route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }, body: readFileSync(join(ROOT, 'dist/index.js')) })),
     );
+  }
+  if (which.includes('pdf')) {
+    await readPdfExample(`http://127.0.0.1:${S.port}/coi/examples/pdf-to-markdown/index.html`);
   }
   if (which.includes('react-vite')) {
     const dir = join(ROOT, 'examples/react-vite');

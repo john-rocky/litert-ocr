@@ -5,7 +5,26 @@ import * as ocr from '../../dist/index.js';
 const MODELS = new URL('../../models/', location.href).href;
 const WASM = new URL('../../wasm/', location.href).href;
 const FIX = new URL('../fixtures/', location.href).href;
+const DOCS = new URL('../out/fixtures/', location.href).href; // node test/fixtures/make-pdfs.mjs
+const PDFJS = new URL('../../node_modules/pdfjs-dist/', location.href).href;
+const LLM_WASM = new URL('../../node_modules/@litert-lm/core/wasm/', location.href).href;
 const local = (extra = {}) => ({ modelBase: MODELS, wasmPath: WASM, ...extra });
+const RECEIPT_SCHEMA = {
+  type: 'object',
+  properties: {
+    store_name: { type: 'string', description: 'Merchant name as printed' },
+    items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, quantity: { type: 'string' }, price: { type: 'string' } }, required: ['name', 'price'] } },
+    total: { type: 'string', description: 'Total amount to pay as printed' },
+  },
+  required: ['items', 'total'],
+};
+const converters = new Map();
+/** One converter per layout setting for the whole page (local model files, local pdf.js). */
+function converter({ layoutBase = null } = {}) {
+  const key = String(layoutBase);
+  if (!converters.has(key)) converters.set(key, ocr.createConverter({ ...local(), pdfjsPath: PDFJS, ...(layoutBase ? { layoutModelBase: layoutBase } : {}) }));
+  return converters.get(key);
+}
 let expected = null;
 let shared = null;
 const log = [];
@@ -374,6 +393,119 @@ window.tests = {
     const r = await w.recognize(FIX + 'mobile.png');
     await w.terminate();
     return { ok: w.info.detector === 'wasm' && /Electricity Bill/.test(r.data.text), info: w.info };
+  },
+
+  // ---- documents: convert() ---------------------------------------------------------------------------
+  async docLayer() {
+    const c = converter();
+    const r = await c.convert(DOCS + 'report.pdf', { to: 'json' });
+    const md = r.document.pages.map((p) => p.markdown).join('\n');
+    const ok = r.document.pages.length === 2 && r.document.pages.every((p) => p.status === 'ok' && p.engine === 'layer')
+      && /^# Harbor Library Monthly Report$/m.test(md) && /^\| Branch \| Visitors \| Loans \|$/m.test(md) && /Repair the lift at the Hilltop branch\.$/m.test(md)
+      && JSON.stringify(r.document.pages[1].tables[0].rows[0]) === '["Day","Hours"]';
+    return { ok, version: r.document.version, ms: r.document.pages.map((p) => p.ms), md: md.slice(0, 500) };
+  },
+  async docScanPdf() {
+    const r = await converter().convert(DOCS + 'scan.pdf', { to: 'json', layout: 'geometry' });
+    const p = r.document.pages[0];
+    return { ok: p.status === 'ok' && p.engine === 'ocr' && /Harbor Library Monthly Report/.test(p.markdown) && /Riverside/.test(p.markdown), layout: p.layout, skew: p.skew, ms: p.ms, md: p.markdown.slice(0, 400) };
+  },
+  async docImageAuto({ mode, layoutBase }) {
+    const c = converter({ layoutBase });
+    const r = await c.convert(DOCS + 'scan.jpg', { to: 'json' });
+    const p = r.document.pages[0];
+    let want;
+    if (!layoutBase) want = p.layout.used === 'geometry' && /not published/.test(p.layout.reason ?? '');
+    else if (mode === 'webgpu') want = p.layout.used === 'model' && p.layout.backend === 'webgpu' && p.blocks.some((b) => b.type === 'table');
+    else want = p.layout.used === 'geometry' && /No WebGPU/.test(p.layout.reason ?? '');
+    return { ok: p.status === 'ok' && want && /Old Town/.test(p.markdown), layout: p.layout, blocks: p.blocks.map((b) => `${b.type}${b.role ? ':' + b.role : ''}`), ms: p.ms };
+  },
+  async docModelForced({ mode, layoutBase }) {
+    if (!layoutBase) return { ok: true, skipped: 'no layout model files ($LITERT_OCR_LAYOUT_BASE unset)' };
+    const r = await converter({ layoutBase }).convert(DOCS + 'scan.jpg', { to: 'json', layout: 'model' });
+    const p = r.document.pages[0];
+    const backend = mode === 'webgpu' ? 'webgpu' : 'wasm';
+    return { ok: p.status === 'ok' && p.layout.used === 'model' && p.layout.backend === backend && p.blocks.some((b) => b.type === 'heading'), layout: p.layout, ms: p.ms };
+  },
+  async docLayoutMissing() {
+    const seen = [];
+    const c = ocr.createConverter({ ...local(), pdfjsPath: PDFJS, layoutModelBase: '../../nope/', logger: (m) => m.status === 'notice' && seen.push(m.message) });
+    try {
+      const r = await c.convert(DOCS + 'scan.jpg', { to: 'json', layout: 'model' });
+      const p = r.document.pages[0];
+      return { ok: p.status === 'ok' && p.layout.used === 'geometry' && /could not be used/.test(p.layout.reason ?? '') && seen.some((m) => /layout model could not be used/.test(m)), layout: p.layout, notices: seen };
+    } finally {
+      await c.terminate();
+    }
+  },
+  async docFailures() {
+    const c = converter();
+    const out = {
+      broken: await expectError(() => c.convert(DOCS + 'broken.pdf'), 'PDF_INVALID', ['damaged']),
+      locked: await expectError(() => c.convert(DOCS + 'locked.pdf'), 'PDF_PASSWORD', ['password']),
+      long: await expectError(() => c.convert(DOCS + 'long.pdf'), 'DOC_TOO_MANY_PAGES', ["pages: '1-100'"]),
+      text: await expectError(() => c.convert(DOCS + 'notes.txt'), 'DOC_UNSUPPORTED_TYPE', ['plain text']),
+      zip: await expectError(() => c.convert(DOCS + 'slides.pptx'), 'DOC_UNSUPPORTED_TYPE', ['ZIP']),
+      pages: await expectError(() => c.convert(DOCS + 'report.pdf', { pages: 'x' }), 'INVALID_ARGUMENT', ['pages']),
+      missing: await expectError(() => c.convert(DOCS + 'nope.pdf'), 'IMAGE_FETCH_FAILED', ['HTTP 404']),
+    };
+    const pw = await c.convert(DOCS + 'locked.pdf', { password: 'open-sesame' });
+    const part = await c.convert(DOCS + 'long.pdf', { pages: '119-', to: 'json' });
+    const blank = await c.convert(DOCS + 'blank.pdf', { to: 'json' });
+    const extra = /protected by a password/.test(pw.content) && part.document.pages.length === 2 && blank.document.pages[0].status === 'empty';
+    return { ok: Object.values(out).every((x) => x.ok) && extra, ...out, blank: blank.document.pages[0] };
+  },
+  async docPdfjsMissing() {
+    const c = ocr.createConverter({ ...local(), pdfjsPath: '../../nope/' });
+    try {
+      return await expectError(() => c.convert(DOCS + 'report.pdf'), 'PDF_UNAVAILABLE', ['pdf.js', 'HTTP 404']);
+    } finally {
+      await c.terminate();
+    }
+  },
+  async docInputs() {
+    const c = converter();
+    const pdf = await (await fetch(DOCS + 'report.pdf')).blob();
+    const jpg = await (await fetch(DOCS + 'scan.jpg')).blob();
+    const file = new File([pdf], 'report.pdf', { type: 'application/pdf' });
+    const a = await c.convert(file, { pages: '2', to: 'json' });
+    const b = await c.convert(await pdf.arrayBuffer(), { pages: '2' });
+    const bm = await createImageBitmap(jpg);
+    const cv = document.createElement('canvas');
+    cv.width = bm.width; cv.height = bm.height;
+    cv.getContext('2d').drawImage(bm, 0, 0);
+    const d = await c.convert(cv, { layout: 'geometry' });
+    const ok = a.document.source.name === 'report.pdf' && /Opening hours/.test(a.content) && /Opening hours/.test(b.content) && /Harbor Library/.test(d.content);
+    return { ok, name: a.document.source.name };
+  },
+
+  // ---- extract() (litert-ocr/extract) -----------------------------------------------------------------
+  async extractSchemaInvalid() {
+    const x = await import('litert-ocr/extract');
+    const a = await expectError(() => x.extract(DOCS + 'scan.jpg', { type: 'array' }), 'SCHEMA_INVALID', ["type 'object'"]);
+    const b = await expectError(() => x.extract(DOCS + 'scan.jpg', { type: 'object', properties: { d: { type: 'date' } } }), 'SCHEMA_INVALID', ['date']);
+    return { ok: a.ok && b.ok, a: a.message, b: b.message };
+  },
+  async extractNoWebGPU() {
+    const x = await import('litert-ocr/extract');
+    return expectError(() => x.extract(DOCS + 'scan.jpg', RECEIPT_SCHEMA, { ocr: local() }), 'LLM_WEBGPU_UNAVAILABLE', ['WebGPU']);
+  },
+  async extractNoLiteRtLm() {
+    // page-nollm.html: its import map has no @litert-lm/core
+    const x = await import('litert-ocr/extract');
+    return expectError(() => x.extract(DOCS + 'scan.jpg', RECEIPT_SCHEMA, { ocr: local() }), 'LLM_UNAVAILABLE', ['@litert-lm/core@0.19.0-nightly.20261018']);
+  },
+  async extractModel404() {
+    const x = await import('litert-ocr/extract');
+    return expectError(() => x.extract(DOCS + 'scan.jpg', RECEIPT_SCHEMA, { ocr: local(), llm: { model: '../../nope.litertlm', wasmPath: LLM_WASM, cache: false } }), 'LLM_MODEL_FETCH_FAILED', ['HTTP 404']);
+  },
+  async extractReceipt({ llmUrl }) {
+    if (!llmUrl) return { ok: true, skipped: 'no model file ($LITERT_OCR_TEST_LLM unset)' };
+    const x = await import('litert-ocr/extract');
+    const img = canvasWithText(560, 520, ['CORNER CAFE', '12 Pier Road', 'Latte 2 x 3.50 7.00', 'Bagel 1 x 2.90 2.90', 'Orange juice 1 x 4.10 4.10', 'Subtotal 14.00', 'Tax 1.12', 'Total 15.12'], '28px Helvetica, Arial, sans-serif');
+    const r = await x.extract(img, RECEIPT_SCHEMA, { documentType: 'receipt', ocr: local(), llm: { model: llmUrl, wasmPath: LLM_WASM, cache: false } });
+    const total = String(r.data?.total ?? '');
+    return { ok: r.valid && /15\.12/.test(total) && Array.isArray(r.data?.items), valid: r.valid, errors: r.errors, data: r.data, raw: r.raw.slice(0, 600), text: r.text, timings: r.timings };
   },
 };
 window.testsReady = true;

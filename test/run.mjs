@@ -1,7 +1,9 @@
 // npm test: Node tests, browser tests (WebGPU and WebAssembly modes), the tesseract.js README example with
-// one line changed (Node ESM, Node CommonJS, browser), the blocks example, and Deno / Bun smoke runs.
-//   node test/run.mjs [node|browser|compat|runtimes ...]   (default: all)
-// Logs go to $LOG_DIR (default test/out/).
+// one line changed (Node ESM, Node CommonJS, browser), the blocks example, Deno / Bun smoke runs, and the document
+// tests (convert / toMarkdown in Node, the litert-ocr command and its MCP server).
+//   node test/run.mjs [node|doc|cli|browser|compat|runtimes ...]   (default: all)
+// Logs go to $LOG_DIR (default test/out/). Optional: $LITERT_OCR_LAYOUT_BASE = a directory with the layout model
+// files (not published yet), $LITERT_OCR_TEST_LLM = the Gemma 4 E2B web model file for the extract() case.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +14,7 @@ import { startServer } from './server.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const LOG = process.env.LOG_DIR ?? join(ROOT, 'test/out');
 mkdirSync(LOG, { recursive: true });
-const parts = process.argv.slice(2).length ? process.argv.slice(2) : ['node', 'compat', 'browser', 'runtimes'];
+const parts = process.argv.slice(2).length ? process.argv.slice(2) : ['node', 'doc', 'cli', 'compat', 'browser', 'runtimes'];
 const summary = [];
 const stamp = () => new Date().toISOString();
 
@@ -30,6 +32,24 @@ function step(name, cmd, args, { env = {}, check = null, timeout = 900000 } = {}
 }
 
 execFileSync(process.execPath, ['test/fetch-models.mjs'], { cwd: ROOT, stdio: 'inherit' });
+execFileSync(process.execPath, ['test/fixtures/make-pdfs.mjs'], { cwd: ROOT, stdio: 'inherit' });
+
+const nodeTestCheck = (out) => {
+  const pass = Number(/ℹ pass (\d+)/.exec(out)?.[1] ?? 0), fail = Number(/ℹ fail (\d+)/.exec(out)?.[1] ?? 1);
+  return [fail === 0 && pass > 0, `${pass} pass, ${fail} fail`];
+};
+if (parts.includes('doc')) {
+  step('doc-tests', process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', 'test/doc.test.mjs'], {
+    env: { LITERT_OCR_DOC_REPORT: join(LOG, 'doc-report.json') },
+    check: nodeTestCheck,
+  });
+}
+if (parts.includes('cli')) {
+  step('cli-mcp-tests', process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', 'test/cli.test.mjs'], {
+    env: { LITERT_OCR_CLI_REPORT: join(LOG, 'cli-report.json') },
+    check: nodeTestCheck,
+  });
+}
 
 if (parts.includes('node')) {
   step('node-tests', process.execPath, ['--test', '--test-reporter=spec', '--test-concurrency=1', 'test/node.test.mjs'], {

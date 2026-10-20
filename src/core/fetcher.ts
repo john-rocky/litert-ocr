@@ -30,7 +30,7 @@ export interface FetchContext {
   /** Platform reader for non-http locations (Node file paths); null = use fetch. */
   readLocal?: (url: string) => Promise<Uint8Array> | null;
   /** The option to name in messages for serving the file yourself. */
-  selfHostOption: 'modelBase' | 'wasmPath';
+  selfHostOption: 'modelBase' | 'wasmPath' | 'layoutModelBase' | 'pdfjsPath';
 }
 
 const isOffline = () => typeof navigator !== 'undefined' && (navigator as { onLine?: boolean }).onLine === false;

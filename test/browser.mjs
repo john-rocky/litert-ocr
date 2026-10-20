@@ -10,7 +10,14 @@ const mode = process.argv[2] ?? 'webgpu';
 const outFile = process.argv[3];
 // optional: a rewritten 320-wide recognizer for the WebGPU-recognizer case (not published; see README)
 const REC320 = process.env.LITERT_OCR_TEST_REC320;
-const S = await startServer(0, REC320 ? { extraRoots: { '/extra/': REC320.replace(/[^/]+$/, '') } } : {});
+// optional: the layout model files (not published yet) and the LLM file of extract() (2.0 GB), served locally
+const LAYOUT = process.env.LITERT_OCR_LAYOUT_BASE;
+const LLM = process.env.LITERT_OCR_TEST_LLM;
+const extraRoots = {};
+if (REC320) extraRoots['/extra/'] = REC320.replace(/[^/]+$/, '');
+if (LAYOUT) extraRoots['/layout/'] = LAYOUT.replace(/\/?$/, '/');
+if (LLM) extraRoots['/llm/'] = LLM.replace(/[^/]+$/, '');
+const S = await startServer(0, { extraRoots });
 const S2 = await startServer(0); // a second origin for the cross-origin cases
 const origin = `http://127.0.0.1:${S.port}`;
 const otherOrigin = `http://127.0.0.1:${S2.port}`;
@@ -21,14 +28,14 @@ const chromeVersion = browser.version();
 const consoleLog = {};
 const t0 = Date.now();
 
-async function open(prefix, setup) {
+async function open(prefix, setup, file = 'page.html') {
   const context = await browser.newContext();
   const page = await context.newPage();
   const consoleLines = [];
   page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text()}`.slice(0, 400)));
   page.on('pageerror', (e) => consoleLines.push(`pageerror: ${e.message}`));
   if (setup) await setup(context, page);
-  await page.goto(`${origin}/${prefix}/test/browser/page.html`);
+  await page.goto(`${origin}/${prefix}/test/browser/${file}`);
   await page.waitForFunction(() => window.testsReady === true, null, { timeout: 30000 });
   return { context, page, consoleLines };
 }
@@ -67,8 +74,26 @@ try {
   for (const name of ['failModel404', 'failSha256', 'failWasm404', 'failDecode', 'failType', 'failImage404', 'failRectangle', 'failTerminated', 'failErrorHandler', 'failDetectAndOutputs', 'forcedWasm']) await run(main.page, name);
   await run(main.page, 'failCrossOriginFetch', { otherOrigin });
   await run(main.page, 'webgpuRecognizer', REC320 ? { mode, rec320Url: `${origin}/coi/extra/${REC320.split('/').pop()}`, rec320Sha: process.env.LITERT_OCR_TEST_REC320_SHA256 } : { mode });
-  consoleLog.main = main.consoleLines.slice(0, 120);
+  // documents (convert) and extract
+  const layoutBase = LAYOUT ? `${origin}/coi/layout/` : null;
+  for (const name of ['docLayer', 'docScanPdf', 'docFailures', 'docPdfjsMissing', 'docInputs', 'docLayoutMissing']) await run(main.page, name);
+  await run(main.page, 'docImageAuto', { mode, layoutBase });
+  await run(main.page, 'docModelForced', { mode, layoutBase }, 300000);
+  await run(main.page, 'extractSchemaInvalid');
+  if (mode === 'wasm') await run(main.page, 'extractNoWebGPU');
+  else {
+    await run(main.page, 'extractModel404');
+    await run(main.page, 'extractReceipt', { llmUrl: LLM ? `${origin}/coi/llm/${LLM.split('/').pop()}` : null }, 600000);
+  }
+  consoleLog.main = main.consoleLines.slice(0, 160);
   await main.context.close();
+
+  if (mode === 'webgpu') {
+    // extract() without @litert-lm/core in the page's import map
+    const nollm = await open('coi', null, 'page-nollm.html');
+    await run(nollm.page, 'extractNoLiteRtLm');
+    await nollm.context.close();
+  }
 
   // blocked defaults (Hugging Face and jsDelivr unreachable)
   const blocked = await open('coi', async (ctx) => {

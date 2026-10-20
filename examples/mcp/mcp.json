@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "litert-ocr": {
+      "command": "npx",
+      "args": ["-y", "litert-ocr", "mcp"]
+    }
+  }
+}

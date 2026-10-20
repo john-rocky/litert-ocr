@@ -18,7 +18,7 @@ import { LITERT_FILES, PKG_NAME, litertPrint, type RuntimeVariant } from '../cor
 import type { InitOptions, WireImage } from '../core/protocol.js';
 import type { Rectangle } from '../core/types.js';
 import { decodeBytes } from './decode.js';
-import { cropScale, jsOps, type Raster } from './raster.js';
+import { cropScale, jsDocOps, jsOps, type Raster } from './raster.js';
 
 const g = globalThis as unknown as Record<string, unknown>;
 const runtimeName = g.Deno ? 'deno' : g.Bun ? 'bun' : 'node';
@@ -186,6 +186,7 @@ const platform: Platform<Raster> = {
   },
 
   ops: jsOps as Platform<Raster>['ops'],
+  doc: jsDocOps,
 };
 
 if (!parentPort) throw new Error('litert-ocr: dist/node-worker.js runs as a worker thread; import the package instead.');

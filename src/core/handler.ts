@@ -2,13 +2,16 @@
 // one at a time in arrival order.
 
 import type * as LiteRtModule from '@litertjs/core';
+import type { Region, RuledBox, Unit } from '../doc/geom.js';
+import { LAYOUT_SIZE, LayoutModel } from '../doc/layout.js';
+import { RULE_WIDTH, SKEW_WIDTH, estimateSkew, ruledBoxes } from '../doc/scan.js';
 import { Engine } from './engine.js';
-import { OcrError, serializeError } from './errors.js';
+import { OcrError, errText, serializeError } from './errors.js';
 import { fetchVerified, type FetchContext, type FileCache, type FileSpec } from './fetcher.js';
-import { LITERT_VERSION, MODEL_BASE, MODEL_FILES, MODEL_NAME, MODEL_REVISION, PKG_NAME, PKG_VERSION, type ModelRole } from './models.js';
+import { LAYOUT_BASE, LAYOUT_FILES, LAYOUT_NAME, LITERT_VERSION, MODEL_BASE, MODEL_FILES, MODEL_NAME, MODEL_REVISION, PKG_NAME, PKG_VERSION, type LayoutForm, type ModelRole } from './models.js';
 import { buildPage, type CoordMap } from './output.js';
 import type { RasterOps } from './pipeline.js';
-import type { InitOptions, ProgressData, Request, Response, WireImage } from './protocol.js';
+import type { DocPageOptions, InitOptions, ProgressData, Request, Response, WireImage } from './protocol.js';
 import type { Rectangle, WorkerInfo } from './types.js';
 
 type LiteRt = typeof LiteRtModule;
@@ -33,6 +36,23 @@ export interface Platform<Src> {
   decode(image: WireImage): Promise<{ src: Src; release(): void }>;
   prepare(src: Src, rect: Rectangle | null, maxSide: number): Promise<Prepared<Src>>;
   ops: RasterOps<Src, unknown, unknown>;
+  /** Page steps of convert(): an RGBA copy scaled to w x h (default smoothing), and the page turned back by deg. */
+  doc: {
+    scaled(src: Src, w: number, h: number): Uint8ClampedArray;
+    rotate(src: Src, deg: number): Promise<{ src: Src; release(): void }>;
+  };
+}
+
+/** What the OCR path of convert() returns for one page (boxes in the caller's image pixels). */
+export interface DocPageData {
+  units: Unit[];
+  ruled: RuledBox[];
+  regions: Region[] | null;
+  page: { width: number; height: number };
+  /** Degrees the page was turned back by (0 = not turned). */
+  skew: number;
+  layout: { used: 'model' | 'geometry'; backend: LayoutForm | null; reason: string | null };
+  timing: { totalMs: number; skewMs: number; detMs: number; recMs: number; ruleMs: number; layoutMs: number };
 }
 
 export interface RuntimeIO {
@@ -46,12 +66,20 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
   let info: WorkerInfo | null = null;
   let chain: Promise<void> = Promise.resolve();
   let terminated = false;
+  // kept from init for the layout model of convert(), which loads on the first page that needs it
+  let runtime: { litert: LiteRt; threads: number } | null = null;
+  let initOpts: InitOptions | null = null;
+  let fileCache: FileCache | null = null;
+  const layouts: Partial<Record<LayoutForm, LayoutModel>> = {};
+  const layoutFailed: Partial<Record<LayoutForm, string>> = {};
 
   const send = (id: string, data: ProgressData) => post({ type: 'progress', id, data });
 
   async function init(id: string, o: InitOptions): Promise<WorkerInfo> {
     const notice = (message: string, level: 'info' | 'warn' = 'info') => send(id, { status: 'notice', progress: 1, message, level });
     const cache = await platform.cache(o);
+    fileCache = cache;
+    initOpts = o;
     if (!cache && o.cacheMethod !== 'none') notice('No cache is available here (Cache API needs a secure context); the files download on every start.', 'warn');
     const makeCtx = (selfHost: 'modelBase' | 'wasmPath', onBytes: FetchContext['onBytes']): FetchContext => ({
       cache,
@@ -69,6 +97,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
         fetchVerified(spec, makeCtx('wasmPath', (loaded, total, fromCache) => send(id, { status, progress: total ? loaded / total : 0, file: spec.name, loaded, total, fromCache }))),
     };
     const { litert, threads } = await platform.loadRuntime(o, io);
+    runtime = { litert, threads };
     const specOf = (role: ModelRole): FileSpec => {
       const over = o.modelFiles[role];
       const pinned = MODEL_FILES[role];
@@ -180,12 +209,157 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     }
   }
 
+  /**
+   * The layout model for a page, loaded on first use. 'auto' = WebGPU form where a WebGPU device exists in a browser,
+   * the WebAssembly form in Node.js / Deno / Bun, else none; 'model' = WebGPU form where possible, else WebAssembly.
+   * Files missing, a download failing or a graph not compiling is not an error: the page is laid out by geometry and
+   * a notice says why (once per form).
+   */
+  async function layoutFor(mode: DocPageOptions['layout'], id: string): Promise<{ model: LayoutModel | null; reason: string | null }> {
+    if (mode === 'geometry') return { model: null, reason: null };
+    const notice = (message: string) => send(id, { status: 'notice', progress: 1, message, level: 'warn' });
+    const base = initOpts?.layoutBase ?? null;
+    if (!base) {
+      const reason = `The layout model (${LAYOUT_NAME}) is not published yet, so pages are laid out by geometry. To use it, pass layoutModelBase: a directory that holds its files (modelInfo.layout).`;
+      if (!layoutFailed.webgpu && !layoutFailed.wasm) notice(reason);
+      layoutFailed.webgpu = layoutFailed.wasm = reason;
+      return { model: null, reason };
+    }
+    const forceWasm = initOpts?.layoutBackend === 'wasm';
+    const gpu = !forceWasm && engine!.gpuUsable && platform.name === 'browser';
+    if (mode === 'auto' && platform.name === 'browser' && !gpu && !forceWasm) {
+      return { model: null, reason: 'No WebGPU device here, so the layout model is not loaded and pages are laid out by geometry. Pass layout: "model" to run it on WebAssembly (173 MB, slower).' };
+    }
+    const form: LayoutForm = gpu ? 'webgpu' : 'wasm';
+    if (layouts[form]) return { model: layouts[form]!, reason: null };
+    if (layoutFailed[form]) return { model: null, reason: layoutFailed[form]! };
+    const files = LAYOUT_FILES[form];
+    const origin = LAYOUT_BASE ?? 'the converted docling-layout-heron files (modelInfo.layout)';
+    const specs: FileSpec[] = (['a', 'b', 'host'] as const).map((r) => ({ name: files[r].file, url: joinUrl(base, files[r].file), bytes: files[r].bytes, sha256: files[r].sha256, origin }));
+    const total = specs.reduce((s, f) => s + (f.bytes ?? 0), 0);
+    const loadedBy = specs.map(() => 0);
+    try {
+      const [a, b, host] = await Promise.all(
+        specs.map((spec, i) =>
+          fetchVerified(spec, {
+            cache: fileCache,
+            cacheMethod: initOpts!.cacheMethod,
+            sha256: platform.sha256,
+            notice,
+            readLocal: platform.readLocal ?? (() => null),
+            selfHostOption: 'layoutModelBase',
+            onBytes: (loaded, _t, fromCache) => {
+              loadedBy[i] = loaded;
+              const sum = loadedBy.reduce((x, y) => x + y, 0);
+              send(id, { status: 'loading layout model', progress: total ? Math.min(1, sum / total) : 0, file: spec.name, loaded: sum, total, fromCache });
+            },
+          }),
+        ),
+      );
+      send(id, { status: 'initializing layout model', progress: 0, message: form });
+      const m = await LayoutModel.create(runtime!.litert, { a: a!, b: b!, host: host! }, form, runtime!.threads);
+      send(id, { status: 'initializing layout model', progress: 1, message: `${LAYOUT_NAME} on ${form === 'webgpu' ? 'WebGPU' : `WebAssembly, ${runtime!.threads} thread${runtime!.threads === 1 ? '' : 's'}`}` });
+      layouts[form] = m;
+      return { model: m, reason: null };
+    } catch (e) {
+      const reason = `The layout model could not be used on ${form === 'webgpu' ? 'WebGPU' : 'WebAssembly'} (${errText(e)}), so pages are laid out by geometry.`;
+      layoutFailed[form] = reason;
+      notice(reason);
+      return { model: null, reason };
+    }
+  }
+
+  async function docPage(req: Extract<Request, { type: 'docPage' }>): Promise<DocPageData> {
+    if (!engine || !info || !runtime) throw new OcrError('INTERNAL', 'convert() reached a worker that is not initialized.');
+    const id = req.id;
+    currentJob = id;
+    const t0 = performance.now();
+    send(id, { status: 'recognizing text', progress: 0 });
+    const decoded = await platform.decode(req.image);
+    let prepared: Prepared<Src> | null = null;
+    let turned: { src: Src; release(): void } | null = null;
+    try {
+      prepared = await platform.prepare(decoded.src, null, MAX_SIDE);
+      if (prepared.map.scale !== 1) {
+        send(id, { status: 'notice', progress: 1, level: 'info', message: `The image is ${prepared.size.width} x ${prepared.size.height}; it is read at ${MAX_SIDE} px on the longer side (boxes are in the original pixels).` });
+      }
+      let src = prepared.src;
+      const { width: W, height: H } = platform.ops.size(src);
+      // 1. skew: estimated on a 1000-px-wide copy, the page turned back on white (as measured)
+      let skew = 0;
+      const ts = performance.now();
+      if (req.options.deskew) {
+        const w = Math.min(SKEW_WIDTH, W), h = Math.round((H * w) / W);
+        skew = estimateSkew(platform.doc.scaled(src, w, h), w, h);
+        if (skew) {
+          turned = await platform.doc.rotate(src, skew);
+          src = turned.src;
+        }
+      }
+      const skewMs = performance.now() - ts;
+      // 2. text lines
+      let lastSent = 0;
+      const r = await engine.read(src, platform.ops, {
+        whitelist: null,
+        blacklist: null,
+        singleLine: false,
+        onLine: (done, total) => {
+          const now = performance.now();
+          if (done === total || now - lastSent > 100) {
+            lastSent = now;
+            send(id, { status: 'recognizing text', progress: total ? 0.1 + (0.8 * done) / total : 0.9 });
+          }
+        },
+      });
+      // 3. ruled lines (table regions for the geometry)
+      const tr = performance.now();
+      const rw = Math.min(W, RULE_WIDTH), rh = Math.round((H * rw) / W);
+      const ruled = ruledBoxes(platform.doc.scaled(src, rw, rh), rw, rh, rw / W);
+      const ruleMs = performance.now() - tr;
+      // 4. layout regions
+      const lay = await layoutFor(req.options.layout, id);
+      let regions: Region[] | null = null;
+      let layoutMs = 0;
+      let used: 'model' | 'geometry' = 'geometry';
+      let reason = lay.reason;
+      if (lay.model) {
+        try {
+          const out = await lay.model.regions(platform.ops.detRGBA(src, LAYOUT_SIZE), W, H);
+          regions = out.regions;
+          layoutMs = out.ms;
+          used = 'model';
+        } catch (e) {
+          reason = `The layout model failed on this page (${errText(e)}); it is laid out by geometry.`;
+          send(id, { status: 'notice', progress: 1, level: 'warn', message: reason });
+        }
+      }
+      const m = prepared.map;
+      const mx = (x: number) => x * m.scale + m.dx, my = (y: number) => y * m.scale + m.dy;
+      const units: Unit[] = r.lines.map((l) => ({ x0: mx(l.box[0]), y0: my(l.box[1]), x1: mx(l.box[2]), y1: my(l.box[3]), text: l.text, score: l.score }));
+      send(id, { status: 'recognizing text', progress: 1 });
+      return {
+        units,
+        ruled: ruled.map((b) => ({ x0: mx(b.x0), y0: my(b.y0), x1: mx(b.x1), y1: my(b.y1) })),
+        regions: regions && regions.map((g) => ({ ...g, x0: mx(g.x0), y0: my(g.y0), x1: mx(g.x1), y1: my(g.y1) })),
+        page: prepared.size,
+        skew,
+        layout: { used, backend: used === 'model' ? lay.model!.backend : null, reason: used === 'model' ? null : reason },
+        timing: { totalMs: performance.now() - t0, skewMs, detMs: r.detMs, recMs: r.recMs, ruleMs, layoutMs },
+      };
+    } finally {
+      turned?.release();
+      prepared?.release();
+      decoded.release();
+    }
+  }
+
   async function handle(req: Request): Promise<void> {
     try {
       if (req.type === 'terminate') {
         terminated = true;
         engine?.dispose();
         engine = null;
+        for (const f of Object.keys(layouts) as LayoutForm[]) layouts[f]?.dispose();
         post({ type: 'resolve', id: req.id, data: { terminated: true } });
         return;
       }
@@ -197,6 +371,10 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       }
       if (req.type === 'recognize') {
         post({ type: 'resolve', id: req.id, data: await recognize(req) });
+        return;
+      }
+      if (req.type === 'docPage') {
+        post({ type: 'resolve', id: req.id, data: await docPage(req) });
         return;
       }
     } catch (e) {

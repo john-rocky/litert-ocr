@@ -85,3 +85,25 @@ export const canvasOps: RasterOps<Src, Crop, Strip> = {
     return wctx.getImageData(0, 0, cw, h).data;
   },
 };
+
+/** Page steps of convert(), drawn as the measured document path drew them. */
+export const canvasDocOps = {
+  /** The whole page scaled to w x h (default smoothing). */
+  scaled(b: Src, w: number, h: number): Uint8ClampedArray {
+    const c = ctx2d(canvas(w, h));
+    c.drawImage(b, 0, 0, w, h);
+    return c.getImageData(0, 0, w, h).data;
+  },
+  /** The page turned by -deg about its centre on a white canvas of the same size. */
+  async rotate(b: Src, deg: number): Promise<{ src: Src; release(): void }> {
+    const c = canvas(b.width, b.height);
+    const ctx = c.getContext('2d') as OffscreenCanvasRenderingContext2D;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate((-deg * Math.PI) / 180);
+    ctx.drawImage(b, -b.width / 2, -b.height / 2);
+    const out = await createImageBitmap(c);
+    return { src: out, release: () => out.close() };
+  },
+};

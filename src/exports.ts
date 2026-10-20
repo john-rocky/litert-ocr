@@ -1,8 +1,33 @@
 // The documented public functions, shared by the browser and Node.js entries (src/index.ts, src/node.ts).
 
 import type { makeApi } from './api.js';
+import type { makeDocApi } from './doc/convert.js';
 
 type Api = ReturnType<typeof makeApi>;
+type DocApi = ReturnType<typeof makeDocApi>;
+
+export function documentedDoc(api: DocApi) {
+  return {
+    /**
+     * A PDF or an image -> Markdown (with GFM tables), JSON or plain text, on this device. Pages with a PDF text layer
+     * are read from it (pdf.js); scans, image-only PDF pages and images are read by OCR with the page layout. Every
+     * page comes back with a status: a page that fails is named with its reason and the other pages are returned.
+     * @param input a file path (Node.js), URL, File, Blob, ArrayBuffer / Uint8Array / Buffer, or any image recognize() takes.
+     * @param options to ('md' | 'json' | 'text'), pages ('1-3'), engine ('auto' | 'layer' | 'ocr'), layout ('auto' |
+     *   'model' | 'geometry'), password, maxPages; and the createWorker options (modelBase, layoutModelBase, logger, ...).
+     * @returns { to, content, document }: content = the Markdown / JSON / text; document = pages with status, blocks
+     *   (type, text, bbox), tables (rows of cells), markdown and text per page.
+     */
+    convert: api.convert,
+    /** convert(input, { ...options, to: 'md' }) -> the Markdown string. */
+    toMarkdown: api.toMarkdown,
+    /**
+     * A converter that keeps its OCR worker (and the layout model) between documents: convert(), toMarkdown(),
+     * terminate(). Use it for several files; convert() and toMarkdown() at the top level create and stop one per call.
+     */
+    createConverter: api.createConverter,
+  };
+}
 
 export function documented(api: Api) {
   return {

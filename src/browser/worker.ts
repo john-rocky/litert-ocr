@@ -8,7 +8,7 @@ import { LITERT_FILES, LITERT_WASM_BASE, litertPrint, type RuntimeVariant } from
 import type { WireImage } from '../core/protocol.js';
 import { sha256Hex } from '../core/sha256.js';
 import type { Rectangle } from '../core/types.js';
-import { canvasOps } from './raster.js';
+import { canvasDocOps, canvasOps } from './raster.js';
 
 declare const self: DedicatedWorkerGlobalScope & {
   Module?: Record<string, unknown>;
@@ -175,6 +175,7 @@ const platform: Platform<ImageBitmap> = {
   },
 
   ops: canvasOps as Platform<ImageBitmap>['ops'],
+  doc: canvasDocOps,
 };
 
 /** Can this worker start a worker from a blob: URL (LiteRT.js's pthreads do)? */

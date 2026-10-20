@@ -5,8 +5,10 @@
 import { OEM, PSM, SINGLE_LINE_PSM, checkLangs, languages } from './core/constants.js';
 import { OcrError, deserializeError } from './core/errors.js';
 import type { CacheMethod } from './core/fetcher.js';
-import { MODEL_ROLES, type ModelRole } from './core/models.js';
-import type { InitOptions, JobParams, ProgressData, Request, Response, WireImage } from './core/protocol.js';
+import type { DocPageData } from './core/handler.js';
+import { LAYOUT_BASE, MODEL_ROLES, type ModelRole } from './core/models.js';
+import type { DocPageOptions, InitOptions, JobParams, ProgressData, Request, Response, WireImage } from './core/protocol.js';
+import type { DocPlatform } from './doc/convert.js';
 import type {
   ImageLike,
   LoggerMessage,
@@ -36,6 +38,8 @@ export interface MainPlatform {
   toWire(image: ImageLike): Promise<{ wire: WireImage; transfer: Transferable[] }>;
   resolveUrl(u: string): string;
   defaults: { modelBase: string; wasmPath: string };
+  /** Documents (convert): reading inputs, pdf.js, drawing PDF pages. */
+  doc: DocPlatform;
 }
 
 /** Startup details of a worker (not in tesseract.js): where it runs and what it loaded. */
@@ -184,6 +188,13 @@ export function makeApi(main: MainPlatform) {
           throw err;
         }
       },
+      /** Internal (convert): one page on the OCR path -> units, ruled lines, layout regions. */
+      async _docPage(image: ImageLike, options: DocPageOptions): Promise<DocPageData> {
+        const jid = `Job-${jobCounter++}-${rand()}`;
+        if (state === 'terminated') throw terminatedError('convert');
+        const { wire, transfer } = await main.toWire(image);
+        return call<DocPageData>({ type: 'docPage', id: jid, image: wire, options }, transfer);
+      },
       async setParameters(p: Record<string, unknown>, jobId?: string) {
         const jid = jobId ?? `Job-${jobCounter++}-${rand()}`;
         if (state === 'terminated') throw terminatedError('setParameters');
@@ -316,7 +327,11 @@ function buildInit(options: Partial<WorkerOptions>, main: MainPlatform): InitOpt
     recognizer,
     cacheMethod,
     eager: options.eager === true,
+    layoutBase: options.layoutModelBase ? dir(main.resolveUrl(options.layoutModelBase)) : LAYOUT_BASE,
   };
+  const lb = options.layoutBackend ?? 'auto';
+  if (lb !== 'auto' && lb !== 'wasm') throw new OcrError('INVALID_ARGUMENT', `options.layoutBackend must be 'auto' or 'wasm', got ${JSON.stringify(lb)}.`);
+  if (lb === 'wasm') o.layoutBackend = 'wasm';
   if (options.cachePath) o.cachePath = options.cachePath;
   return o;
 }

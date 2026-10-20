@@ -16,3 +16,15 @@ Components used at run time (not part of this package's source; installed or dow
     a9b2febf2022fdd48ac2b5522115d6db3f8e214e (Apache License 2.0): converted from PaddlePaddle PP-OCRv6
     Small (Apache License 2.0); the repository's THIRD_PARTY_NOTICES.md lists the sources.
   - pngjs (MIT) and jpeg-js (BSD-3-Clause), which the Node.js build uses to decode images.
+  - pdf.js, npm pdfjs-dist 6.4.299 (Apache License 2.0), which reads PDFs for convert(); the browser build loads it
+    from jsDelivr, the Node.js build from the installed package.
+  - @napi-rs/canvas 1.0.11 (MIT), an optional dependency that draws PDF pages for OCR in Node.js.
+  - @modelcontextprotocol/sdk 1.32.1 and zod 3.25.76 (MIT), optional dependencies of the MCP server.
+  - The page layout model files listed in modelInfo.layout: converted from docling-layout-heron
+    (docling-project/docling-layout-heron, revision 8f39ad3c; the model card states Apache License 2.0; the
+    docling-ibm-models code it runs with is MIT License, Copyright (c) 2024 International Business Machines).
+    Not published yet.
+  - For litert-ocr/extract: LiteRT-LM JS, npm @litert-lm/core 0.19.0-nightly.20261018 (Apache License 2.0), an
+    optional peer dependency, and the Gemma 4 E2B web model file from Hugging Face
+    litert-community/gemma-4-E2B-it-litert-lm, revision c9190371a5b7a1129af8da87e10b60e1ff9c8967 (the model card
+    states Apache License 2.0).

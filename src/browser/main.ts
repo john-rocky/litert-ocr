@@ -144,7 +144,7 @@ export function describe(v: unknown): string {
   return !name || name === 'Object' ? 'a plain object' : `a ${name}`;
 }
 
-export const browserMain: MainPlatform = {
+export const browserMain: Omit<MainPlatform, 'doc'> = {
   name: 'browser',
   spawn,
   startTimeoutHint,

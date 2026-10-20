@@ -1,20 +1,29 @@
 # litert-ocr
 
-> OCR for photos and screenshots in the browser and in Node.js, Deno and Bun, with the same API as tesseract.js 7 (createWorker, worker.recognize, worker.terminate). PP-OCRv6-Small on LiteRT.js: the text detector runs on WebGPU when the browser has it, the recognizer on WebAssembly; images stay on the device. Independent project, not affiliated with Google.
+> OCR for photos and screenshots in the browser and in Node.js, Deno and Bun, with the same API as tesseract.js 7 (createWorker, worker.recognize, worker.terminate); PDFs, scans and photos to Markdown with tables, JSON or text (convert); a JSON Schema filled from a document by an on-device LLM in the browser (litert-ocr/extract); a CLI (npx litert-ocr file.pdf) and an MCP server (npx litert-ocr mcp). PP-OCRv6-Small and a page layout model on LiteRT.js: WebGPU when the browser has it, else WebAssembly; files stay on the device. Independent project, not affiliated with Google.
 
 ```js
-import { createWorker } from 'litert-ocr';   // was: from 'tesseract.js'
+import { createWorker, convert } from 'litert-ocr';   // was: from 'tesseract.js'
 const worker = await createWorker('eng');
 const { data } = await worker.recognize(image); // URL, File, Blob, <img>, <canvas>, ImageBitmap, ImageData, Buffer, file path
 console.log(data.text);
 await worker.terminate();
+
+const { content, document } = await convert(pdfOrImage, { to: 'md' }); // 'md' | 'json' | 'text'; document.pages[].status
+```
+
+```sh
+npx litert-ocr scan.pdf --md                      # exit 0 all pages read, 2 unreadable input, 3 a page empty or failed
+claude mcp add litert-ocr -- npx -y litert-ocr mcp  # tools: convert_to_markdown, convert, ocr_image, list_input_formats
 ```
 
 ## Start here
 
-- [README](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/README.md): install, the one-line switch from tesseract.js and what differs, options, output formats, model and runtime files, threads (COOP / COEP), errors and their next steps, measured speed with device and date.
+- [README](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/README.md): install, the one-line switch from tesseract.js and what differs, documents to Markdown and JSON, extract, the CLI and the MCP server, options, output formats, model and runtime files, threads (COOP / COEP), errors and their next steps, measured speed and accuracy with device and date.
 - [AGENTS.md](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/AGENTS.md): for coding agents. Task → API → file.
+- [examples/pdf-to-markdown/index.html](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/pdf-to-markdown/index.html): PDF, scan or photo to Markdown in the browser.
+- [examples/mcp/README.md](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/mcp/README.md): the MCP server for Claude Code and Claude Desktop.
 - [examples/html/index.html](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/html/index.html): plain HTML with the CDN import.
 - [examples/react-vite/src/App.jsx](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/react-vite/src/App.jsx): React with Vite.
 - [examples/nextjs/app/ocr.jsx](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/examples/nextjs/app/ocr.jsx): Next.js App Router client component.
-- [src/core/types.ts](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/src/core/types.ts): every option and result field, documented.
+- [src/core/types.ts](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/src/core/types.ts) and [src/doc/types.ts](https://raw.githubusercontent.com/john-rocky/litert-ocr/main/src/doc/types.ts): every option and result field, documented.

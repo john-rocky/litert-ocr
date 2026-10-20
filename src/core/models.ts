@@ -59,13 +59,57 @@ export function firstVisitBytes(variant: RuntimeVariant): number {
   return m + LITERT_FILES[variant].js.bytes + LITERT_FILES[variant].wasm.bytes;
 }
 
-/** The pinned files, for copying them to your own server (modelBase / wasmPath). */
+/**
+ * The page layout model of convert(): docling-layout-heron (Apache-2.0, docling-project/docling-layout-heron
+ * @8f39ad3c) converted to two LiteRT graphs (Graph A = backbone + encoder, Graph B = decoder; the top-300 query
+ * selection runs in JS between them). Two forms: fp16 weights for WebGPU, fp32 for WebAssembly (fp16 weights are
+ * slow on WebAssembly). Not on Hugging Face yet (upload pending): while LAYOUT_SOURCE is null the default layout
+ * is geometry, and `layoutModelBase` points at a directory that holds these files. Publishing = filling this one
+ * line with the Hub repository and its commit; the files below keep their names, sizes and sha256.
+ */
+export const LAYOUT_SOURCE: { repo: string; revision: string } | null = null; // upload pending
+export const LAYOUT_BASE: string | null = LAYOUT_SOURCE ? `https://huggingface.co/${(LAYOUT_SOURCE as { repo: string }).repo}/resolve/${(LAYOUT_SOURCE as { revision: string }).revision}/` : null;
+export const LAYOUT_NAME = 'docling-layout-heron';
+
+export type LayoutForm = 'webgpu' | 'wasm';
+export type LayoutRole = 'a' | 'b' | 'host';
+
+export const LAYOUT_FILES: Record<LayoutForm, Record<LayoutRole, PinnedFile>> = {
+  webgpu: {
+    a: { file: 'heronA_es_fp16w.tflite', bytes: 72561808, sha256: '28689bb02d46c26942535e0c88f5dc8ac3a159032f4b6a2e0af501f820037661' },
+    b: { file: 'heronB_es_fp16w.tflite', bytes: 14968352, sha256: '23e003458b553d80446c8adab976d8e99a96bbb4296a1d4e17270293ab8064e8' },
+    host: { file: 'heron_host.bin', bytes: 168000, sha256: '30fa346260bed6a85747473df8e24fd958e976326b0ed6c278233d4b938a3836' },
+  },
+  wasm: {
+    a: { file: 'heronA_es.tflite', bytes: 143798916, sha256: 'd277c01ed3131232fe87b3dcb6ce174b7c2aa40c1b637d2fe2153447d3fa8870' },
+    b: { file: 'heronB_es.tflite', bytes: 29087496, sha256: '30983cd39513cb1b1290f554206a762d8eb10a5b9baef7764a42f448f284ee78' },
+    host: { file: 'heron_host.bin', bytes: 168000, sha256: '30fa346260bed6a85747473df8e24fd958e976326b0ed6c278233d4b938a3836' },
+  },
+};
+
+/** pdf.js (npm pdfjs-dist), which reads PDFs for convert(). The browser build loads it from jsDelivr by default. */
+export const PDFJS_VERSION = '6.4.299';
+export const PDFJS_BASE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/`;
+// sha256 of the npm files; jsDelivr serves the same bytes (checked 2026-10-20).
+export const PDFJS_FILES: Record<'main' | 'worker', PinnedFile> = {
+  main: { file: 'build/pdf.min.mjs', bytes: 458904, sha256: '57456c8e0c81e46be31174b499ef77f2b9f5ee46d04412ba627320a36755d4c2' },
+  worker: { file: 'build/pdf.worker.min.mjs', bytes: 1264342, sha256: '9536359f1b8367850d485731ca1d5e45c159a7b7a0912325e539937aa21ceb18' },
+};
+
+/** The pinned files, for copying them to your own server (modelBase / wasmPath / layoutModelBase / pdfjsPath). */
 export const modelInfo = {
   repo: MODEL_REPO,
   revision: MODEL_REVISION,
   base: MODEL_BASE,
   files: MODEL_ROLES.map((role) => ({ role, ...MODEL_FILES[role] })),
   runtime: { package: '@litertjs/core', version: LITERT_VERSION, base: LITERT_WASM_BASE, files: Object.values(LITERT_FILES).flatMap((v) => [v.js, v.wasm]) },
+  layout: {
+    model: LAYOUT_NAME,
+    status: LAYOUT_BASE ? ('published' as const) : ('upload pending' as const),
+    base: LAYOUT_BASE,
+    forms: { webgpu: Object.values(LAYOUT_FILES.webgpu), wasm: Object.values(LAYOUT_FILES.wasm) },
+  },
+  pdfjs: { package: 'pdfjs-dist', version: PDFJS_VERSION, base: PDFJS_BASE, files: Object.values(PDFJS_FILES) },
 };
 
 /** Emscripten print hooks: drop LiteRT's start-up INFO lines and the NPU registry warning, keep the rest. */

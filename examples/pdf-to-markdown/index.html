@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF to Markdown in the browser</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; max-width: 860px; }
+    pre { white-space: pre-wrap; background: #f4f4f5; padding: 12px; border-radius: 6px; }
+    #status { color: #555; }
+    label { margin-right: 12px; }
+  </style>
+</head>
+<body>
+  <h1>PDF, scan or photo to Markdown</h1>
+  <p>Pick a PDF or an image. It is converted in this tab; nothing is uploaded. Pages with a text layer are read from it;
+    scanned pages and images are read by OCR.</p>
+  <p>
+    <label><input type="radio" name="to" value="md" checked> Markdown</label>
+    <label><input type="radio" name="to" value="json"> JSON</label>
+    <label><input type="radio" name="to" value="text"> Text</label>
+  </p>
+  <input type="file" id="uploader" accept="application/pdf,image/*">
+  <p id="status">Ready.</p>
+  <p><a id="save" hidden>Save the result</a></p>
+  <pre id="out"></pre>
+  <script type="module">
+    import { createConverter } from 'https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm';
+
+    const status = document.getElementById('status');
+    const out = document.getElementById('out');
+    const save = document.getElementById('save');
+    // ?layout=<directory URL> = the layout model files (until they are published, pages are laid out by geometry)
+    const layoutModelBase = new URLSearchParams(location.search).get('layout') ?? undefined;
+
+    // One converter for every file: its OCR worker and models load on the first scanned page, then stay.
+    const converter = createConverter({
+      layoutModelBase,
+      logger: (m) => {
+        if (m.status === 'loading model' || m.status === 'loading layout model') status.textContent = `Loading the model… ${Math.round(m.progress * 100)}%`;
+        if (m.status === 'converting page') status.textContent = `Converting ${m.message ?? ''}…`;
+        if (m.status === 'notice') console.warn(m.message);
+      },
+    });
+
+    document.getElementById('uploader').addEventListener('change', async (evt) => {
+      const file = evt.target.files[0];
+      if (!file) return;
+      const to = document.querySelector('input[name=to]:checked').value;
+      status.textContent = `Converting ${file.name}…`;
+      save.hidden = true;
+      const t0 = performance.now();
+      try {
+        const r = await converter.convert(file, { to });
+        out.textContent = r.content;
+        const pages = r.document.pages;
+        const bad = pages.filter((p) => p.status !== 'ok').map((p) => `page ${p.page}: ${p.status} (${p.reason})`);
+        status.textContent = `${file.name}: ${pages.length} page${pages.length === 1 ? '' : 's'} in ${Math.round(performance.now() - t0)} ms` +
+          ` (${pages.map((p) => p.engine === 'layer' ? 'text layer' : `OCR, ${p.layout?.used} layout`).join('; ')}).${bad.length ? ' ' + bad.join('; ') : ''}`;
+        save.href = URL.createObjectURL(new Blob([r.content], { type: 'text/plain' }));
+        save.download = file.name.replace(/\.[^.]+$/, '') + (to === 'json' ? '.json' : to === 'text' ? '.txt' : '.md');
+        save.hidden = false;
+      } catch (e) {
+        status.textContent = `${file.name}: ${e.code ?? 'error'}: ${e.message}`;
+      }
+    });
+  </script>
+</body>
+</html>

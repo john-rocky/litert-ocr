@@ -202,6 +202,16 @@ export interface WorkerOptions {
   backend: 'auto' | 'wasm';
   /** Node: cache directory (default: $XDG_CACHE_HOME/litert-ocr or ~/.cache/litert-ocr). */
   cachePath: string;
+  /**
+   * convert(): directory URL (browser) or path (Node) of the layout model files (modelInfo.layout). Needed while the
+   * layout model is not published (upload pending); the files must match the pinned sha256.
+   */
+  layoutModelBase: string;
+  /**
+   * convert(): where the layout model runs. 'auto' (default): WebGPU where a browser has a device (the fp16 files),
+   * else WebAssembly (the fp32 files). 'wasm': always WebAssembly (no GPU memory; the same files as Node.js).
+   */
+  layoutBackend: 'auto' | 'wasm';
   /** 'write' (default) | 'readOnly' | 'refresh' | 'none' — as in tesseract.js. */
   cacheMethod: 'write' | 'readOnly' | 'refresh' | 'none';
   /** Accepted and ignored (tesseract.js paths): the model and runtime come from modelBase and wasmPath. */

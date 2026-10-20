@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>litert-ocr browser tests (no LiteRT-LM)</title>
+<!-- the same page without @litert-lm/core in the import map: extract() must say how to install it -->
+<script type="importmap">
+{ "imports": {
+  "litert-ocr": "../../dist/index.js",
+  "litert-ocr/extract": "../../dist/extract.js"
+} }
+</script>
+<body>
+<script type="module" src="./tests.js"></script>
+</body>
+</html>

@@ -14,7 +14,9 @@
     "rootDir": "src",
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": { "litert-ocr": ["./src/index.ts"] }
   },
   "include": ["src"]
 }

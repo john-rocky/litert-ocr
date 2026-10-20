@@ -1,11 +1,14 @@
 # AGENTS.md — for coding agents adding OCR to a web page or a Node.js script
 
-Read this if someone asked you to "read the text in an image", "add OCR", or "replace tesseract.js". This
-file routes; the README has the details.
+Read this if someone asked you to "read the text in an image", "add OCR", "replace tesseract.js", "turn a PDF
+or a scan into Markdown", "pull fields out of a receipt", or "give my agent a document tool". This file routes;
+the README has the details.
 
 **What this is.** An OCR library with the tesseract.js 7 API (`createWorker` → `worker.recognize` →
 `worker.terminate`), running PP-OCRv6-Small with LiteRT.js in the browser (WebGPU or WebAssembly, in a Web
-Worker) and in Node.js / Deno / Bun (WebAssembly, in a worker thread). Images never leave the device.
+Worker) and in Node.js / Deno / Bun (WebAssembly, in a worker thread); `convert()` turns PDFs, scans and photos
+into Markdown with tables, JSON or text; `litert-ocr/extract` fills a JSON Schema with an on-device LLM in the
+browser; `npx litert-ocr` is a CLI and `npx litert-ocr mcp` an MCP server. Files never leave the device.
 Independent project, not affiliated with Google or PaddlePaddle.
 
 ## Route
@@ -27,7 +30,16 @@ Independent project, not affiliated with Google or PaddlePaddle.
 | A page with a strict Content-Security-Policy | allow `worker-src blob:`, or serve `node_modules/litert-ocr/dist/worker.js` and pass `workerPath` | `src/browser/main.ts` |
 | An error | every error is an `OcrError` with a stable `code` and a message that names the next step | README "Errors", `src/core/errors.ts` |
 | Several images in parallel | `createScheduler()`, `addWorker`, `addJob('recognize', image)` | `src/api.ts` `createScheduler` |
-| Run the tests | `npm install && npm run build && npm test` (headless Chrome via Playwright; Node; Deno and Bun when installed) | `test/run.mjs` |
+| PDF, scan or photo → Markdown | `const { content } = await convert(file)`; `toMarkdown(file)`; several files: `createConverter()` then `convert` / `terminate` | `src/doc/convert.ts`, `examples/pdf-to-markdown` |
+| Document structure as JSON | `convert(file, { to: 'json' })` → `pages[]` with `status`, `blocks` (`type`, `text`, `bbox`), `tables` (`rows`) | `src/doc/types.ts` |
+| Part of a long PDF | `convert(file, { pages: '1-3' })`; over 100 selected pages rejects with `DOC_TOO_MANY_PAGES` (`maxPages`) | `src/doc/convert.ts` `selectPages` |
+| An encrypted PDF | `convert(file, { password })`; without it `PDF_PASSWORD` | `src/doc/pdf.ts` |
+| Force OCR or only the text layer | `engine: 'ocr'` / `'layer'` (default `'auto'`: text layer where a page has one) | README "Documents → Markdown" |
+| Headings and tables of scanned pages from the layout model | `layoutModelBase: '<dir with the files of modelInfo.layout>'` while the model is not published; `layout: 'model'` / `'geometry'` | `src/core/models.ts` `LAYOUT_FILES`, `src/doc/layout.ts` |
+| Fields of a receipt / invoice as JSON (browser, WebGPU) | `import { extract } from 'litert-ocr/extract'`; `await extract(image, schema, { documentType: 'receipt' })` → `{ data, valid, errors }`; needs `@litert-lm/core@0.19.0-nightly.20261018`; first call downloads 2.0 GB | `src/extract/browser.ts` |
+| Convert files from a shell | `npx litert-ocr file.pdf [--md\|--json\|--text] [--pages 1-3] [--out DIR]`; exit 0 / 2 (unreadable) / 3 (a page empty or failed) | `src/cli/main.ts` |
+| Give an agent a document tool | `claude mcp add litert-ocr -- npx -y litert-ocr mcp`; tools `convert_to_markdown`, `convert`, `ocr_image`, `list_input_formats` | `src/cli/mcp.ts`, `examples/mcp` |
+| Run the tests | `npm install && npm run build && npm test` (headless Chrome via Playwright; Node; the CLI and the MCP server; Deno and Bun when installed) | `test/run.mjs` |
 
 ## Rules
 
@@ -37,5 +49,10 @@ Independent project, not affiliated with Google or PaddlePaddle.
 - Accuracy and speed numbers in the README carry a device, a browser and a date; do not repeat them for
   another device.
 - Every downloaded file is pinned by sha256 (`src/core/models.ts`); a mirror must serve the same bytes.
-- `data.text` holds one detected line per line, in reading order. There is no paragraph or table
-  analysis yet (one block, one paragraph).
+- `data.text` of `recognize()` holds one detected line per line, in reading order, in one block (the
+  tesseract.js shape). For paragraphs, headings and tables use `convert()`.
+- `convert()` never rejects because of one page: check `document.pages[].status` (`'ok'`, `'empty'`, `'failed'`
+  with `reason`). It rejects for an input it cannot read at all (`PDF_INVALID`, `PDF_PASSWORD`,
+  `DOC_UNSUPPORTED_TYPE`, `IMAGE_FETCH_FAILED`) and for a setup error (models, runtime).
+- `extract()` is browser-only (WebGPU). In Node.js it rejects with `LLM_UNAVAILABLE`: use `convert()` for the text
+  and a model of your choice for the fields.

@@ -18,6 +18,18 @@ export interface InitOptions {
   cachePath?: string;
   /** Load the 640 and 960 recognizers at start instead of on first use. */
   eager: boolean;
+  /** Directory URL / path of the layout model files (convert); null = none (not published yet and not given). */
+  layoutBase?: string | null;
+  /** Where the layout model runs (WorkerOptions.layoutBackend); absent = 'auto'. */
+  layoutBackend?: 'auto' | 'wasm';
+}
+
+/** One page of convert() on the OCR path. */
+export interface DocPageOptions {
+  /** 'auto': the layout model where it is cheap (WebGPU in a browser; WebAssembly in Node.js), else geometry. */
+  layout: 'auto' | 'model' | 'geometry';
+  /** Estimate the page skew (+-2 deg) and turn the page back before reading. */
+  deskew: boolean;
 }
 
 /** An image in a form that can cross the thread boundary. */
@@ -38,6 +50,7 @@ export interface JobParams {
 export type Request =
   | { type: 'init'; id: string; options: InitOptions }
   | { type: 'recognize'; id: string; image: WireImage; rectangle: Rectangle | null; params: JobParams; output: Partial<OutputFormats> }
+  | { type: 'docPage'; id: string; image: WireImage; options: DocPageOptions }
   | { type: 'terminate'; id: string };
 
 export interface ProgressData {

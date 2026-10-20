@@ -17,7 +17,10 @@ function resolveUrl(u: string): string {
 function spawn(_options: Partial<WorkerOptions>): Transport {
   let w: ThreadWorker;
   try {
-    w = new ThreadWorker(new URL('./node-worker.js', import.meta.url), { name: 'litert-ocr' });
+    // stdout: true = the thread's console output goes to stderr below, never into the caller's stdout (which may
+    // carry a protocol, as in `litert-ocr mcp`, or the converted document)
+    w = new ThreadWorker(new URL('./node-worker.js', import.meta.url), { name: 'litert-ocr', stdout: true });
+    w.stdout.pipe(process.stderr);
   } catch (e) {
     throw new OcrError('WORKER_START_FAILED', `The OCR worker thread could not start (${errText(e)}). The package needs Node.js 20.19 or newer (or Deno 2 / Bun 1.1+) and its dist/node-worker.js file.`, { cause: e });
   }
@@ -74,7 +77,7 @@ function describe(v: unknown): string {
   return !name || name === 'Object' ? 'a plain object' : `a ${name}`;
 }
 
-export const nodeMain: MainPlatform = {
+export const nodeMain: Omit<MainPlatform, 'doc'> = {
   name: 'node',
   spawn,
   startTimeoutHint: () => 'The OCR worker thread did not start within 20 s (it sent nothing). Check that dist/node-worker.js is installed next to dist/node.js and that worker_threads are allowed.',
