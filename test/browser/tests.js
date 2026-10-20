@@ -348,6 +348,16 @@ window.tests = {
     return { ok, info };
   },
 
+  // record only (always ok): the start check given the published 320 file, which misreads lines on WebGPU (LiteRT
+  // issue #9661). Does the one fixed line catch that fault here?
+  async recognizerAutoHub320() {
+    const hub = ocr.modelInfo.files.find((f) => f.role === 'rec320');
+    const w = await ocr.createWorker('eng', 1, local({ modelFiles: { rec320: { url: MODELS + hub.file, sha256: hub.sha256 } } }));
+    const info = w.info;
+    await w.terminate();
+    return { ok: true, recordOnly: true, recognizer: info.recognizer, check: info.recognizerCheck, reason: info.recognizerReason };
+  },
+
   // ---- a PNG or JPEG cut short: a notice in every browser; the browser decides whether it reads the part that arrived
   async cutShortNotice() {
     const notices = [];

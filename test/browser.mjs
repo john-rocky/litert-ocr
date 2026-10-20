@@ -96,6 +96,7 @@ try {
   const autoCoi = WEBKIT ? (REC320 ? 'webgpu' : 'unpublished') : 'threads';
   await run(main.page, 'recognizerAuto', { ...rec320('coi'), expect: autoCoi }, 300000);
   if (autoCoi === 'webgpu') await run(main.page, 'recognizerAutoMismatch', rec320('coi'));
+  if (WEBKIT) await run(main.page, 'recognizerAutoHub320', {}, 300000); // record only
   await run(main.page, 'cutShortNotice');
   // documents (convert) and extract
   const layoutBase = LAYOUT ? `${origin}/coi/layout/` : null;
@@ -154,6 +155,7 @@ try {
   const autoPlain = mode === 'wasm' ? 'nogpu' : REC320 ? 'webgpu' : 'unpublished';
   await run(plain.page, 'recognizerAuto', { ...rec320('plain'), expect: autoPlain }, 300000);
   if (autoPlain === 'webgpu') await run(plain.page, 'recognizerAutoMismatch', rec320('plain'));
+  if (mode === 'webgpu') await run(plain.page, 'recognizerAutoHub320', {}, 300000); // record only
   await plain.context.close();
 
   // CSP without blob: workers

@@ -281,7 +281,7 @@ Every failure is an `OcrError` with a stable `code`; the message says what happe
 
 WebGPU missing or unable to compile the detector is not an error: the detector runs on WebAssembly and the logger gets a notice.
 
-A PNG or JPEG file that ends before its end marker (a download cut short) gets a notice before it is decoded, in every browser and in Node.js: "This PNG file ends before its IEND chunk (32622 bytes): it was cut short, as by an interrupted download. ..." What happens next depends on the decoder: Chrome 155 rejects such a PNG with `IMAGE_DECODE_FAILED`, while WebKit 26.5 reads the part that arrived (the first half of the bytes of a 1280 x 800 screenshot: 10 lines, 2026-10-20); in Node.js, PNG and JPEG files cut short are rejected.
+A PNG or JPEG file that ends before its end marker (a download cut short) gets a notice before it is decoded, in every browser and in Node.js: "This PNG file ends before its IEND chunk (32622 bytes): it was cut short, as by an interrupted download. ..." What happens next depends on the decoder: Chrome 155 rejects such a PNG with `IMAGE_DECODE_FAILED`, while WebKit 26.5 reads the part that arrived (the first half of the bytes of a 1280 x 800 screenshot: 10 lines, 2026-10-20); in Node.js the decoders rejected a PNG and a JPEG cut in half.
 
 ## Examples
 
