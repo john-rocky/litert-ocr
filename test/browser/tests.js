@@ -262,7 +262,8 @@ window.tests = {
 
   // Why the worker is classic: a module worker cannot call importScripts(), which LiteRT.js 2.5.3's loader uses.
   async moduleWorkerProbe() {
-    const src = "try { importScripts('data:text/javascript,0'); postMessage('importScripts worked'); } catch (e) { postMessage(String(e)); }";
+    const imported = URL.createObjectURL(new Blob(['0'], { type: 'text/javascript' }));
+    const src = `try { importScripts(${JSON.stringify(imported)}); postMessage('importScripts worked'); } catch (e) { postMessage(String(e)); }`;
     const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
     const run = (type) => new Promise((ok) => { const w = new Worker(url, { type }); w.onmessage = (e) => { ok(e.data); w.terminate(); }; w.onerror = (e) => ok('error event: ' + e.message); });
     const moduleResult = await run('module');

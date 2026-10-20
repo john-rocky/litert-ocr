@@ -111,6 +111,8 @@ async function toWire(image: ImageLike): Promise<{ wire: WireImage; transfer: Tr
       // a copy, so the caller's ImageBitmap stays usable
       bitmap = await createImageBitmap(image as ImageBitmapSource);
     } catch (e) {
+      // a browser may refuse to copy a cross-origin image at all (SecurityError) instead of tainting the copy
+      if ((e as { name?: string })?.name === 'SecurityError') throw crossOrigin(e);
       throw new OcrError('IMAGE_DECODE_FAILED', `This ${(image as object).constructor?.name ?? 'image'} could not be read (${errText(e)}).`);
     }
     try {
@@ -119,10 +121,7 @@ async function toWire(image: ImageLike): Promise<{ wire: WireImage; transfer: Tr
       probe.getImageData(0, 0, 1, 1);
     } catch (e) {
       bitmap.close();
-      throw new OcrError(
-        'IMAGE_CROSS_ORIGIN',
-        `This image comes from another origin without CORS, so its pixels cannot be read (${errText(e)}). Load it with crossOrigin="anonymous" from a server that sends Access-Control-Allow-Origin, or fetch it on your own server and pass the Blob.`,
-      );
+      throw crossOrigin(e);
     }
     return { wire: { kind: 'bitmap', bitmap }, transfer: [bitmap] };
   }
@@ -135,6 +134,12 @@ async function toWire(image: ImageLike): Promise<{ wire: WireImage; transfer: Tr
     `recognize() cannot read ${describe(image)}. Pass a URL or data URL string, a File or Blob, an <img>, <canvas> or <video>, an OffscreenCanvas, ImageBitmap or ImageData, or the image file's bytes (ArrayBuffer / Uint8Array).`,
   );
 }
+
+const crossOrigin = (e: unknown) =>
+  new OcrError(
+    'IMAGE_CROSS_ORIGIN',
+    `This image comes from another origin without CORS, so its pixels cannot be read (${errText(e)}). Load it with crossOrigin="anonymous" from a server that sends Access-Control-Allow-Origin, or fetch it on your own server and pass the Blob.`,
+  );
 
 export function describe(v: unknown): string {
   if (v === null) return 'null';

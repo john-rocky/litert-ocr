@@ -24,11 +24,12 @@ Independent project, not affiliated with Google or PaddlePaddle.
 | Next.js (App Router) | a `'use client'` component that does `await import('litert-ocr')` inside `useEffect` (never on the server) | `examples/nextjs/app/ocr.jsx` |
 | Node.js script | same API; pass a file path, Buffer, URL or `{ data, width, height }`; PNG and JPEG only | `test/compat/readme.mjs`, `src/node/` |
 | Make WebAssembly use threads (several times faster) | serve the page with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`; check `worker.info.threads` | `examples/*/` configs, README "Speed and accuracy" |
-| Run offline / self-host the files | copy the model files (`modelInfo.files`) and LiteRT.js wasm files (`modelInfo.runtime`) to your server; pass `modelBase` and `wasmPath`; `eager: true` loads everything at start | README "Model and runtime files" |
-| Check where it runs | `worker.info` = `{ detector, recognizer, recognizers, threads, runtime, model, platform }`; the logger's `'initialized'` message says the same | `src/core/handler.ts` |
-| Recognizer on WebGPU (experimental, faster) | `recognizer: 'webgpu'`: 640 / 960 on WebGPU with the published files; the published 320 file misreads on WebGPU, so it stays on WebAssembly unless `modelFiles.rec320` gives a fixed file | `src/core/engine.ts` `compileRec` |
+| Run offline | nothing to do in a browser: after the first result the model files not needed yet download into the cache in the background (`prefetch`, logger status `'caching model'`), then a visit without network reads any image; `eager: true` loads all five files at start instead | README "Offline", `src/core/handler.ts` |
+| Self-host the files | copy the model files (`modelInfo.files`) and LiteRT.js wasm files (`modelInfo.runtime`) to your server; pass `modelBase` and `wasmPath` | README "Model and runtime files" |
+| Check where it runs | `worker.info` = `{ detector, recognizer, recognizers, recognizerReason, recognizerCheck, threads, runtime, model, platform }`; the logger's `'initialized'` message and a notice say the same | `src/core/handler.ts` |
+| Safari (WebAssembly on 1 thread) / recognizer on WebGPU | default `recognizer: 'auto'`: on WebGPU only where WebAssembly has 1 thread, a WebGPU device exists and the WebGPU form of the 320 file is available (not published yet: `modelFiles.rec320`), after a fixed line reads the same on both; `'wasm'` forces WebAssembly, `'webgpu'` forces WebGPU without the check | README "Safari and WebGPU", `src/core/engine.ts` `startAuto` |
 | A page with a strict Content-Security-Policy | allow `worker-src blob:`, or serve `node_modules/litert-ocr/dist/worker.js` and pass `workerPath` | `src/browser/main.ts` |
-| An error | every error is an `OcrError` with a stable `code` and a message that names the next step | README "Errors", `src/core/errors.ts` |
+| An error | every error is an `OcrError` with a stable `code` and a message that names the next step; a PNG / JPEG cut short gets a notice first (browsers differ on reading it) | README "Errors", `src/core/errors.ts`, `src/core/cutshort.ts` |
 | Several images in parallel | `createScheduler()`, `addWorker`, `addJob('recognize', image)` | `src/api.ts` `createScheduler` |
 | PDF, scan or photo → Markdown | `const { content } = await convert(file)`; `toMarkdown(file)`; several files: `createConverter()` then `convert` / `terminate` | `src/doc/convert.ts`, `examples/pdf-to-markdown` |
 | Document structure as JSON | `convert(file, { to: 'json' })` → `pages[]` with `status`, `blocks` (`type`, `text`, `bbox`), `tables` (`rows`) | `src/doc/types.ts` |
@@ -39,7 +40,8 @@ Independent project, not affiliated with Google or PaddlePaddle.
 | Fields of a receipt / invoice as JSON (browser, WebGPU) | `import { extract } from 'litert-ocr/extract'`; `await extract(image, schema, { documentType: 'receipt' })` → `{ data, valid, errors }`; needs `@litert-lm/core@0.19.0-nightly.20261018`; first call downloads 2.0 GB | `src/extract/browser.ts` |
 | Convert files from a shell | `npx litert-ocr file.pdf [--md\|--json\|--text] [--pages 1-3] [--out DIR]`; exit 0 / 2 (unreadable) / 3 (a page empty or failed) | `src/cli/main.ts` |
 | Give an agent a document tool | `claude mcp add litert-ocr -- npx -y litert-ocr mcp`; tools `convert_to_markdown`, `convert`, `ocr_image`, `list_input_formats` | `src/cli/mcp.ts`, `examples/mcp` |
-| Run the tests | `npm install && npm run build && npm test` (headless Chrome via Playwright; Node; the CLI and the MCP server; Deno and Bun when installed) | `test/run.mjs` |
+| Run the tests | `npm install && npm run build && npm test` (headless Chrome and WebKit via Playwright; Node; the CLI and the MCP server; Deno and Bun when installed) | `test/run.mjs` |
+| Rename the package | `node scripts/rename.mjs <npm name> [--repo owner/name] [--dry-run]`: the name, command, CDN and GitHub URLs, imports, cache names and docs at once | `scripts/rename.mjs` |
 
 ## Rules
 

@@ -1,12 +1,22 @@
 # litert-ocr
 
-OCR for photos and screenshots in the browser and in Node.js with the tesseract.js API; on a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 259 ms (median of 185 English and Japanese photos and screenshots, 2026-10-20).
+OCR for photos and screenshots in the browser and in Node.js with the tesseract.js API, running PP-OCRv6-Small on LiteRT.js; on a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 318 ms (median of 10 English and Japanese screenshots, photos and receipts, 2026-10-20).
 
-It runs PP-OCRv6-Small with LiteRT.js. In the browser the text detector runs on WebGPU when the browser has it and the recognizer on WebAssembly, inside a Web Worker; in Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
+In the browser the text detector runs on WebGPU when the browser has it and the recognizer on WebAssembly (or on WebGPU where WebAssembly has only one thread, [below](#safari-and-webgpu)), inside a Web Worker; in Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
 
 It also turns PDFs, scans and photos into Markdown with tables, JSON or text ([`convert`](#documents--markdown)), fills a JSON Schema from a document with an on-device language model in the browser ([`extract`](#extract-json)), and runs from the command line ([`npx litert-ocr`](#cli)) and as an MCP server for coding agents ([`npx litert-ocr mcp`](#mcp)).
 
-Status: v0. Tested in Chrome 155 on macOS (WebGPU and WebAssembly), Node.js 24, Deno 2.9 and Bun 1.4; Safari, Firefox and phones are not tested yet.
+Status: v0. Tested in Node.js 24, Deno 2.9 and Bun 1.4, and in these browsers (2026-10-20; 12 images: 6 English and Japanese screenshots, 3 photos of English text, 2 receipts and a 4032 x 3024 photo with Japanese text; time = from handing over the image file to the text, model loaded, median of the 10 images whose time included no model download):
+
+| Browser, device | Detector / recognizer | WebAssembly threads | Time per image | Lines read as in Chrome on the Mac |
+|---|---|---|---|---|
+| Chrome 155, Mac Studio (Apple M4 Max) | WebGPU / WebAssembly | 12 | 318 ms | 335 of 335 |
+| WebKit 26.5 (the engine of Safari), same Mac | WebGPU / WebAssembly | 1 | 1,823 ms | 287 of 335 |
+| WebKit 26.5, recognizer on WebGPU ([below](#safari-and-webgpu)) | WebGPU / WebGPU | 1 | 249 ms | 287 of 335 |
+| Chrome 155, Galaxy S26 | WebGPU / WebAssembly | 8 | 722 ms (CPU slowed by heat) | 335 of 335 |
+| Chrome 155, Pixel 8a | WebGPU / WebAssembly | 9 | 3,563 ms (CPU slowed by heat) | 335 of 335 |
+
+Both phones lowered their CPU clocks for heat while reading: the Galaxy S26 from the third image on (about 20 seconds into the run), the Pixel 8a slightly from the second. WebKit differs from Chrome in 48 of the 335 lines (spacing or characters); the difference comes from how it turns the image file into pixels, not from the model (Chrome reads the same 335 lines with the 1-thread WebAssembly build WebKit uses). Safari on an iPhone and Firefox are not tested yet.
 
 ```js
 import { createWorker } from 'litert-ocr';
@@ -182,9 +192,19 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Without these headers OCR still works, on one thread (several times slower), and the logger and the console say so. When you cannot set headers (GitHub Pages), [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) sets them from a service worker. `worker.info` reports where the worker runs: `{ detector, recognizer, recognizers, threads, runtime, model, platform }`.
+Without these headers OCR still works, on one thread (several times slower), and the logger and the console say so. When you cannot set headers (GitHub Pages), [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) sets them from a service worker. `worker.info` reports where the worker runs: `{ detector, recognizer, recognizers, recognizerReason, recognizerCheck, threads, runtime, model, platform }`.
 
-Why the recognizer runs on WebAssembly: with LiteRT.js 2.5.3 on WebGPU its output differs from WebAssembly on many lines (376 of 496 test lines read the same on an Apple M4 Max in Chrome 155, 2026-10-19), the fault reported for PP-OCRv5 in [LiteRT issue #9661](https://github.com/google-ai-edge/LiteRT/issues/9661). The detector reads the same on both.
+### Safari and WebGPU
+
+Safari has no WebAssembly relaxed SIMD, which the threaded LiteRT.js build needs, so there WebAssembly runs on 1 thread (WebKit 26.5: 1,823 ms per image against 318 ms in Chrome on the same Mac, table above). The recognizer could run on WebGPU instead, but the published 320-wide recognizer misreads lines there: with LiteRT.js 2.5.3, 376 of 496 test lines read the same as on WebAssembly (Apple M4 Max, Chrome 155, 2026-10-19), the fault reported for PP-OCRv5 in [LiteRT issue #9661](https://github.com/google-ai-edge/LiteRT/issues/9661). A rewritten 320-wide file (`modelInfo.rec320WebGpu`: the attention scores computed in two halves; on WebAssembly it gives exactly the numbers of the published file) reads the same on WebGPU as on WebAssembly on an Apple M4 Max: all 295 test images in Chrome 155, and the 12 images of the table in WebKit 26.5, where it took 249 ms per image, 0.14 times the WebAssembly time. The published 640 and 960 files read the same on WebGPU. The rewritten file is not on Hugging Face yet.
+
+`recognizer: 'auto'` (the default) uses it. Where WebAssembly has 1 thread, a WebGPU device exists and that file is available (published, or given as `modelFiles.rec320`), the worker reads one fixed text line on WebAssembly and on WebGPU at start and moves the recognizer to WebGPU only if every output step is the same; each wider recognizer is checked the same way when it first loads. Where WebAssembly has threads (Chrome with the two headers above) the recognizer stays on WebAssembly. `worker.info.recognizerReason` and a logger notice say what was chosen and why. On phones WebGPU is not always the better place: in Chrome 155 on a Galaxy S26 the WebGPU recognizer read 13 of 335 lines differently and took longer (843 against 722 ms per image), on a Pixel 8a it read the same text in 0.70 times the time (2026-10-20). The detector reads the same on WebGPU and WebAssembly.
+
+## Offline
+
+After the first result, the browser build downloads the model files it has not needed yet (the 640 and 960 recognizers, 21.5 MB each) into the cache in the background, so that a later visit reads any image without the network. The logger reports it as `'caching model'` and ends with a message that says whether every model and runtime file is in the cache. The download starts only after a result, so the first text is not delayed; it is skipped when the browser asks to save data (Save-Data) or has no cache, and `prefetch: false` turns it off. `eager: true` loads all five model files at start instead. Measured with the 12 images of the table and the phone screenshot, offline after one visit: ⟨R5-OFFLINE⟩ of 13 read in Chrome 155 and ⟨R5-OFFLINE-WK⟩ of 13 in WebKit 26.5 (2026-10-20); before this background download, 7 of 13 in Chrome and 8 of 13 in WebKit (the others needed the 960-wide recognizer, which had never been stored).
+
+A recognizer file that is still missing offline rejects with `MODEL_FETCH_FAILED`, and the message says to call `createWorker()` once online with `eager: true`. Node.js, Deno and Bun download the 640 and 960 files when a line first needs them (a short process would stop a background download half-way); `prefetch: true` turns the background download on there.
 
 ## Model and runtime files
 
@@ -196,18 +216,20 @@ All files are pinned: a fixed revision on Hugging Face and on jsDelivr, each che
 | `ppocrv6_small_det_640_fp32.tflite` (detector) | 12,380,664 | at start |
 | `ppocrv6_small_rec_320_fp32.tflite` (recognizer, lines up to 320 px wide at height 48) | 21,477,068 | at start |
 | `characters.json` | 168,510 | at start |
-| `ppocrv6_small_rec_640_fp32.tflite` | 21,477,068 | the first time a line is wider than 320 px at height 48 |
-| `ppocrv6_small_rec_960_fp32.tflite` | 21,476,976 | the first time a line is wider than 640 px |
+| `ppocrv6_small_rec_640_fp32.tflite` | 21,477,068 | the first time a line is wider than 320 px at height 48; in a browser also in the background after the first result |
+| `ppocrv6_small_rec_960_fp32.tflite` | 21,476,976 | the first time a line is wider than 640 px; in a browser also in the background after the first result |
+| `ppocrv6_small_rec_320_fp32_webgpu.tflite` (the 320-wide recognizer for WebGPU, [above](#safari-and-webgpu)) | 21,517,364 | in place of the published 320 file where `recognizer: 'auto'` may use WebGPU (not published yet: `modelFiles.rec320`) |
 | pdf.js 6.4.299 (`build/pdf.min.mjs` + `build/pdf.worker.min.mjs`, from jsDelivr) | 1,723,246 | browser: the first PDF given to `convert()` (Node.js uses the installed package) |
 | layout model, WebGPU form (`heronA_es_fp16w.tflite` + `heronB_es_fp16w.tflite` + `heron_host.bin`) | 87,698,160 | the first OCR page of `convert()` with the layout model on WebGPU (not published yet: `layoutModelBase`) |
 | layout model, WebAssembly form (`heronA_es.tflite` + `heronB_es.tflite` + `heron_host.bin`) | 173,054,412 | the same on WebAssembly (Node.js, or `layout: 'model'` without WebGPU) |
 
 Options for where the files come from:
 
-- `modelBase`: a directory URL (browser) or path (Node.js) with the five model files under their Hub names. The files must match the pinned sha256.
+- `modelBase`: a directory URL (browser) or path (Node.js) with the five model files under their Hub names (`modelInfo.files`; once published, also `modelInfo.rec320WebGpu` for the browsers where the recognizer may run on WebGPU). The files must match the pinned sha256.
 - `wasmPath`: a directory URL with the LiteRT.js 2.5.3 `wasm/` files (`node_modules/@litertjs/core/wasm/`).
 - `modelFiles`: replace single files, `{ rec320: { url, sha256 } }`; without `sha256` the file is used unverified (a notice says so). For trying other model files.
-- `eager: true`: load all five model files at start (for offline use after the first visit).
+- `eager: true`: load all five model files at start.
+- `prefetch`: in a browser (default `true`) the model files not loaded yet go into the cache in the background after the first result ([Offline](#offline)); in Node.js, Deno and Bun the default is `false`.
 - `cacheMethod`: `'write'` (default), `'readOnly'`, `'refresh'`, `'none'`, as in tesseract.js.
 
 ## API
@@ -216,13 +238,13 @@ Options for where the files come from:
 import { createWorker, createScheduler, recognize, PSM, OEM, OcrError, modelInfo } from 'litert-ocr';
 ```
 
-- `createWorker(langs?, oem?, options?)` → `Promise<Worker>`. Options: `logger`, `errorHandler`, `modelBase`, `modelFiles`, `wasmPath`, `workerPath`, `backend` (`'auto'` = detector on WebGPU when it compiles, the browser default; `'wasm'`, the Node.js default), `recognizer` (below), `eager`, `cachePath`, `cacheMethod`.
-- `recognizer: 'webgpu'` (experimental): the 640 and 960 recognizers run on WebGPU, where the published files read the same as on WebAssembly. The 320 one moves to WebGPU only when `modelFiles.rec320` replaces the published file (which misreads there) with one that does not; no such file is published yet, so by default it stays on WebAssembly and a notice says so. `worker.info.recognizers` shows where each width runs.
+- `createWorker(langs?, oem?, options?)` → `Promise<Worker>`. Options: `logger`, `errorHandler`, `modelBase`, `modelFiles`, `wasmPath`, `workerPath`, `backend` (`'auto'` = detector on WebGPU when it compiles, the browser default; `'wasm'`, the Node.js default), `recognizer` (below), `eager`, `prefetch`, `cachePath`, `cacheMethod`.
+- `recognizer`: `'auto'` (default; [Safari and WebGPU](#safari-and-webgpu)), `'wasm'` (always WebAssembly), or `'webgpu'` (experimental: the 640 and 960 recognizers on WebGPU, the 320 one only with `modelFiles.rec320`, no check). `worker.info.recognizers` shows where each width runs, `worker.info.recognizerReason` why, `worker.info.recognizerCheck` the start check of `'auto'` (`{ width, steps, differing, ms, text }`, or `null`).
 - `worker.recognize(image, options?, output?, jobId?)` → `{ jobId, data }`. `image`: a URL or data URL, `File`, `Blob`, `<img>`, `<canvas>`, `CanvasRenderingContext2D`, `OffscreenCanvas`, `ImageBitmap`, `ImageData`, an `ArrayBuffer` / `Uint8Array` / `Buffer` of an image file, `{ data, width, height }` (RGBA), and in Node.js a file path. `options.rectangle = { left, top, width, height }` reads only that region (boxes stay in whole-image pixels). `output` defaults to `{ text: true }`; add `blocks: true`, `hocr: true`, `tsv: true`.
 - `data.text`: the lines, each ending in `"\n"`. `data.confidence`: mean word confidence, 0-100. `data.blocks` (when asked): `blocks[].paragraphs[].lines[].words[].symbols[]`, each with `text`, `confidence` (0-100) and `bbox { x0, y0, x1, y1 }`.
 - `worker.setParameters(params)`, `worker.terminate()` (a second call resolves and does nothing), `worker.reinitialize()` (no-op), `worker.info`.
 - `createScheduler()` with `addWorker`, `addJob('recognize', ...)`, `getQueueLen`, `getNumWorkers`, `terminate`. `recognize(image, langs, options)` creates, uses and terminates a worker (deprecated in tesseract.js, kept for old code).
-- `logger` receives `{ workerId, jobId, userJobId, status, progress }` with `status` `'loading runtime'`, `'loading model'` (with `file`, `loaded`, `total`, `fromCache`), `'initializing model'`, `'initialized'` (its `message` names the backends and the thread count), `'recognizing text'`, and `'notice'` (with `message`: a fallback taken, an option ignored, an image resized).
+- `logger` receives `{ workerId, jobId, userJobId, status, progress }` with `status` `'loading runtime'`, `'loading model'`, `'initializing model'`, `'initialized'` (its `message` names the backends and the thread count), `'recognizing text'`, `'caching model'` ([Offline](#offline)), and `'notice'` (with `message`: a fallback taken, an option ignored, an image resized, an image file cut short, where the recognizer runs). The loading and caching messages carry `file`, `loaded`, `total` and `fromCache`: `file` is the file whose bytes just arrived. In `'loading model'` and `'caching model'`, `loaded` and `total` count all the files of that step together (the three model files loaded at start are one step, 34 MB), so `progress` moves once from 0 to 1 per step; `'loading runtime'` counts each runtime file on its own.
 
 Images whose longer side is over 4,096 pixels are scaled down to 4,096 before reading; boxes are still in the original pixels, and a notice says so.
 
@@ -232,13 +254,13 @@ Every failure is an `OcrError` with a stable `code`; the message says what happe
 
 | `code` | When | Next step in the message |
 |---|---|---|
-| `MODEL_FETCH_FAILED` | a model or runtime file did not download: HTTP status, offline, or blocked | the URL; offline: the first start needs the network once; blocked: allow the host in `connect-src`, or self-host with `modelBase` / `wasmPath` |
+| `MODEL_FETCH_FAILED` | a model or runtime file did not download: HTTP status, offline, or blocked | the URL; offline: the first start needs the network once, and a recognizer loaded later that is not in the cache needs `createWorker()` once online with `eager: true`; blocked: allow the host in `connect-src`, or self-host with `modelBase` / `wasmPath` |
 | `MODEL_SHA256_MISMATCH` | a file differs from the pinned one | copy the files again from the pinned source, or pass your own file with its sha256 in `modelFiles` |
 | `MODEL_COMPILE_FAILED`, `RUNTIME_LOAD_FAILED` | LiteRT.js could not compile a model or start | the LiteRT.js message |
 | `WORKER_START_FAILED` | the worker could not start (a CSP without `blob:` workers) | add `worker-src blob:`, or serve `dist/worker.js` and pass `workerPath` |
 | `IMAGE_UNSUPPORTED_TYPE` | `recognize()` got something that is not an image | the accepted types |
 | `IMAGE_FETCH_FAILED` | the image URL or file could not be read (404, CORS) | the `Access-Control-Allow-Origin` header, or pass a `Blob` / `File` |
-| `IMAGE_DECODE_FAILED` | the bytes are not a readable image (truncated, PDF, HEIC; in Node.js anything but PNG and JPEG) | the formats that work; in Node.js how to convert or pass raw pixels |
+| `IMAGE_DECODE_FAILED` | the bytes are not a readable image (cut short, PDF, HEIC; in Node.js anything but PNG and JPEG) | the formats that work; for a file cut short, pass the complete file; in Node.js how to convert or pass raw pixels |
 | `IMAGE_CROSS_ORIGIN` | an `<img>` from another origin without CORS | load it with `crossOrigin="anonymous"` from a server that sends CORS headers |
 | `LANG_NOT_SUPPORTED` | a language whose script the model cannot read, or an unknown code | keep tesseract.js for that language, or pass `'eng'` |
 | `WORKER_TERMINATED` | `recognize()` after `terminate()` | create a new worker |
@@ -259,6 +281,8 @@ Every failure is an `OcrError` with a stable `code`; the message says what happe
 
 WebGPU missing or unable to compile the detector is not an error: the detector runs on WebAssembly and the logger gets a notice.
 
+A PNG or JPEG file that ends before its end marker (a download cut short) gets a notice before it is decoded, in every browser and in Node.js: "This PNG file ends before its IEND chunk (32622 bytes): it was cut short, as by an interrupted download. ..." What happens next depends on the decoder: Chrome 155 rejects such a PNG with `IMAGE_DECODE_FAILED`, while WebKit 26.5 reads the part that arrived (the first half of the bytes of a 1280 x 800 screenshot: 10 lines, 2026-10-20); in Node.js, PNG and JPEG files cut short are rejected.
+
 ## Examples
 
 - [`examples/html`](examples/html): plain HTML with the CDN import (`node serve.mjs` serves it with the two headers).
@@ -269,7 +293,7 @@ WebGPU missing or unable to compile the detector is not an error: the detector r
 
 ## Tests
 
-`npm install && npm run build && npm test` runs the Node.js tests, the browser tests in headless Chrome (WebGPU and WebAssembly modes, with the failure paths), the tesseract.js README example with the import changed (Node.js ESM and CommonJS, and the browser), Deno and Bun smoke tests when they are installed, and the document tests: `convert()` in Node.js and in the browser, the `litert-ocr` command, and the MCP server driven by the MCP SDK client (the document inputs are made by `test/fixtures/make-pdfs.mjs`). Two optional environment variables add the cases that need files not published yet: `LITERT_OCR_LAYOUT_BASE` (a directory with the layout model files) and `LITERT_OCR_TEST_LLM` (the Gemma 4 E2B web model file, for one `extract()` run). `node test/examples.mjs` builds the examples and reads one image in each (a PDF and a scan in `pdf-to-markdown`).
+`npm install && npm run build && npm test` runs the Node.js tests, the browser tests with the failure paths in headless Chrome (with WebGPU and without it) and in WebKit, the engine of Safari (Playwright's build: WebAssembly on 1 thread), the tesseract.js README example with the import changed (Node.js ESM and CommonJS, and the browser), Deno and Bun smoke tests when they are installed, and the document tests: `convert()` in Node.js and in the browser, the `litert-ocr` command, and the MCP server driven by the MCP SDK client (the document inputs are made by `test/fixtures/make-pdfs.mjs`). Optional environment variables add the cases that need files not published yet: `LITERT_OCR_TEST_REC320` and `LITERT_OCR_TEST_REC320_SHA256` (the WebGPU form of the 320-wide recognizer, for the recognizer cases), `LITERT_OCR_LAYOUT_BASE` (a directory with the layout model files) and `LITERT_OCR_TEST_LLM` (the Gemma 4 E2B web model file, for one `extract()` run). `node test/examples.mjs` builds the examples and reads one image in each (a PDF and a scan in `pdf-to-markdown`), and starts the MCP example's configuration and converts a PDF through it.
 
 ## License
 
