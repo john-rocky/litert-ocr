@@ -1,22 +1,22 @@
 # litert-ocr
 
-OCR for photos and screenshots in the browser and in Node.js with the tesseract.js API, running PP-OCRv6-Small on LiteRT.js; on a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 318 ms (median of 10 English and Japanese screenshots, photos and receipts, 2026-10-20).
+OCR for photos and screenshots in the browser and in Node.js, with the tesseract.js API. It runs PP-OCRv6-Small on LiteRT.js. On a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 318 ms (median of 10 English and Japanese screenshots, photos and receipts, 2026-10-20).
 
-In the browser the text detector runs on WebGPU when the browser has it and the recognizer on WebAssembly (or on WebGPU where WebAssembly has only one thread, [below](#safari-and-webgpu)), inside a Web Worker; in Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
+In the browser the text detector runs on WebGPU when the browser has it and the recognizer on WebAssembly, inside a Web Worker. (In Safari, where WebAssembly has one thread, the recognizer can move to WebGPU once the rewritten 320-wide recognizer is published or given as a file: [below](#safari-and-webgpu).) In Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
 
 It also turns PDFs, scans and photos into Markdown with tables, JSON or text ([`convert`](#documents--markdown)), fills a JSON Schema from a document with an on-device language model in the browser ([`extract`](#extract-json)), and runs from the command line ([`npx litert-ocr`](#cli)) and as an MCP server for coding agents ([`npx litert-ocr mcp`](#mcp)).
 
-Status: v0. Tested in Node.js 24, Deno 2.9 and Bun 1.4, and in these browsers (2026-10-20; 12 images: 6 English and Japanese screenshots, 3 photos of English text, 2 receipts and a 4032 x 3024 photo with Japanese text; time = from handing over the image file to the text, model loaded, median of the 10 images whose time included no model download):
+Status: v0. Tested in Node.js 24, Deno 2.9 and Bun 1.4, and in these browsers (2026-10-20; 12 images: 6 English and Japanese screenshots, 3 photos of English text, 2 receipts and a 4032 x 3024 photo with Japanese text; time = from handing over the image file to the text, with the model already loaded; median of the 10 images that needed no extra model download):
 
-| Browser, device | Detector / recognizer | WebAssembly threads | Time per image | Lines read as in Chrome on the Mac |
+| Browser, device | Detector / recognizer | WebAssembly threads | Time per image | Text lines identical to Chrome on the Mac |
 |---|---|---|---|---|
 | Chrome 155, Mac Studio (Apple M4 Max) | WebGPU / WebAssembly | 12 | 318 ms | 335 of 335 |
-| WebKit 26.5 (the engine of Safari), same Mac | WebGPU / WebAssembly | 1 | 1,823 ms | 287 of 335 |
-| WebKit 26.5, recognizer on WebGPU ([below](#safari-and-webgpu)) | WebGPU / WebGPU | 1 | 249 ms | 287 of 335 |
+| WebKit 26.5 (Safari's engine, Playwright's build), same Mac | WebGPU / WebAssembly | 1 | 1,823 ms | 287 of 335 |
+| WebKit 26.5, recognizer on WebGPU with the rewritten 320 file ([below](#safari-and-webgpu); not the default until it is published) | WebGPU / WebGPU | 1 | 249 ms | 287 of 335 |
 | Chrome 155, Galaxy S26 | WebGPU / WebAssembly | 8 | 722 ms (CPU slowed by heat) | 335 of 335 |
 | Chrome 155, Pixel 8a | WebGPU / WebAssembly | 9 | 3,563 ms (CPU slowed by heat) | 335 of 335 |
 
-Both phones lowered their CPU clocks for heat while reading: the Galaxy S26 from the third image on (about 20 seconds into the run), the Pixel 8a slightly from the second. WebKit differs from Chrome in 48 of the 335 lines (spacing or characters); the difference comes from how it turns the image file into pixels, not from the model (Chrome reads the same 335 lines with the 1-thread WebAssembly build WebKit uses). Safari on an iPhone and Firefox are not tested yet.
+Both phones lowered their CPU clocks for heat while reading: the Galaxy S26 from the third image on, the Pixel 8a slightly from the second. WebKit differs from Chrome in 48 of the 335 lines (spacing or characters); the difference comes from how it turns the image file into pixels, not from the model (Chrome reads the same 335 lines with the 1-thread WebAssembly build WebKit uses). Safari itself (on a Mac or an iPhone) and Firefox are not tested yet; the WebKit rows use Playwright's WebKit build.
 
 ```js
 import { createWorker } from 'litert-ocr';
@@ -50,7 +50,7 @@ What differs:
 
 | | tesseract.js 7 | litert-ocr |
 |---|---|---|
-| Languages | one data file per language (`'eng'`, `'jpn'`, `'eng+jpn'`) | one model reads Latin-script, Greek, Chinese and Japanese text. `langs` is checked but picks nothing. Korean, Cyrillic, Arabic, Hebrew, Thai and Indic scripts are not covered: `createWorker('kor')` rejects with `LANG_NOT_SUPPORTED` |
+| Languages | one data file per language (`'eng'`, `'jpn'`, `'eng+jpn'`) | one model reads Latin-script, Greek, Chinese and Japanese text. `langs` is checked (a script the model cannot read rejects) but does not change the model. Korean, Cyrillic, Arabic, Hebrew, Thai and Indic scripts are not covered: `createWorker('kor')` rejects with `LANG_NOT_SUPPORTED` |
 | `oem`, `corePath`, `langPath`, `legacyCore`, `gzip` | engine and data options | accepted and ignored (the path options get a notice) |
 | `setParameters` | every Tesseract parameter | `tessedit_char_whitelist`, `tessedit_char_blacklist`, and `tessedit_pageseg_mode` `SINGLE_LINE` / `SINGLE_WORD` / `RAW_LINE` / `SINGLE_CHAR` (read the image as one line, no detection). Others are ignored; the result lists them |
 | Output | `text`, `blocks`, `hocr`, `tsv`, `box`, `unlv`, `osd`, `pdf`, images | `text`, `blocks`, `hocr`, `tsv`. The other formats are `null` |
@@ -84,7 +84,12 @@ The layout model is not published yet (its files are listed in `modelInfo.layout
 
 PDFs are read by pdf.js (pdfjs-dist 6.4.299). The browser build loads it from jsDelivr when the first PDF arrives (pinned and checked by sha256; `pdfjsPath` to serve it yourself). In Node.js it is a dependency and needs Node.js 22.13 or newer; drawing a page without a text layer needs `@napi-rs/canvas` (an optional dependency, installed by default).
 
-Measured on a test set made for this (2026-10-20; Mac Studio, Apple M4 Max; Chrome 155 headless; the layout model from local files): 24 A4 pages written for the test (11 in English, 13 in Japanese; one and two columns; tables with full rules, top and bottom rules, or none; headings and lists; public-domain prose), each as a printed PDF, a 150 dpi image of it and a scan of that image (turned up to 2 degrees, uneven light, noise, JPEG), and 20 pages of DocLayNet (manuals, patents, laws). Text error = edit distance between the page's text and the reference, divided by the longer length (0 = exact). Tables = how many of the 8 tables per language came out with the right number of rows and columns, and the share of cells read exactly. DocLayNet = share of its reference text not found in the output, order ignored (it has no reading order or table structure; a page without a text layer counts as empty on the text-layer row). Time = from handing over the file to the result, model loaded, median per page.
+Measured on a test set made for this (2026-10-20; Mac Studio, Apple M4 Max; Chrome 155 headless; the layout model from local files): 24 A4 pages written for the test (11 in English, 13 in Japanese; one and two columns; tables with full rules, top and bottom rules, or none; headings and lists; public-domain prose), each as a printed PDF, a 150 dpi image of it and a scan of that image (turned up to 2 degrees, uneven light, noise, JPEG), and 20 pages of DocLayNet (manuals, patents, laws).
+
+- Text error = edit distance between the page's text and the reference, divided by the longer length (0 = exact).
+- Tables = how many of the 8 tables per language came out with the right number of rows and columns, and the share of cells read exactly.
+- DocLayNet = share of its reference text not found in the output, order ignored (it has no reading order or table structure; a page without a text layer counts as empty on the text-layer row).
+- Time = from handing over the file to the result, with the model loaded; median per page.
 
 | Path | Input | Text error EN / JA | Tables right shape EN / JA | Exact cells EN / JA | DocLayNet text missed | Time per page |
 |---|---|---|---|---|---|---|
@@ -107,7 +112,10 @@ const schema = {
   properties: { store_name: { type: 'string' }, items: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'string' } } } }, total: { type: 'string' } },
   required: ['items', 'total'],
 };
-const { data, valid, errors } = await extract(receiptImage, schema, { documentType: 'receipt' });
+const { data, valid, errors } = await extract(receiptImage, schema, {
+  documentType: 'receipt',
+  instructions: 'Copy every value exactly as printed on the receipt. Use one entry in "items" per purchased item line. Leave out a field that is not on the receipt.',
+});
 ```
 
 The document is read by OCR (a PDF: its text), the lines are laid out in rows, and Gemma 4 E2B (its web build) on LiteRT-LM JS answers with a JSON object for the schema. The answer is repaired only by removing a code fence, the text around the object and trailing commas, then checked against the schema (types, required fields, `enum`): `valid` and `errors` say how it went, `raw` holds the answer as it came.
@@ -116,7 +124,7 @@ The document is read by OCR (a PDF: its text), the lines are laid out in rows, a
 - Needs the optional peer dependency `@litert-lm/core@0.19.0-nightly.20261018`: `npm install @litert-lm/core@0.19.0-nightly.20261018`, or pass `{ llm: { module } }`. It is a nightly because the current stable release, 0.18.1, cannot create an engine ([LiteRT-LM issue #4051](https://github.com/google-ai-edge/LiteRT-LM/issues/4051)); this moves to the stable release that fixes it.
 - The first call downloads the model, 2.0 GB (2,008,432,640 bytes, `gemma-4-E2B-it-web.litertlm` from Hugging Face litert-community/gemma-4-E2B-it-litert-lm at a pinned commit), into the browser cache; the logger says so, and later calls read the cache. `createExtractor()` keeps the model loaded for several documents.
 
-On 74 receipts of the CORD v2 test set, with `documentType: 'receipt'` and the instructions `'Copy every value exactly as printed on the receipt. Use one entry in "items" per purchased item line. Leave out a field that is not on the receipt.'`, the answer parsed as JSON for 74 of 74 and 440 of 687 fields (64.0 %) matched the reference (item names, quantities and prices, subtotal, tax, total). The model took 2.0 s per receipt, 2.1 s with the OCR (medians; Mac Studio, Apple M4 Max, Chrome 155 headless, LiteRT-LM JS 0.19.0-nightly.20261018, 2026-10-20).
+On 74 receipts of the CORD v2 test set, with `documentType: 'receipt'` and the `instructions` shown above (the default instructions are shorter and were not measured), the answer parsed as JSON for 74 of 74 and 440 of 687 fields (64.0 %) matched the reference (item names, quantities and prices, subtotal, tax, total). The model took 2.0 s per receipt, 2.1 s with the OCR (medians; Mac Studio, Apple M4 Max, Chrome 155 headless, LiteRT-LM JS 0.19.0-nightly.20261018, 2026-10-20).
 
 ## CLI
 
@@ -138,7 +146,7 @@ npx litert-ocr scan.jpg invoice.pdf --json --out converted/
 
 Exit code: `0` every page read, `2` an input could not be read, `3` some page came back empty or failed (named on stderr and in the JSON `pages[].status`), `1` a usage error. Models download once into `~/.cache/litert-ocr` (or `$XDG_CACHE_HOME/litert-ocr`). Files never leave the machine.
 
-On the same Mac with Node.js 24.4.1 (2026-10-20, the 24 test pages above, one process per format, median per file of one page): a printed PDF (text layer) 18 ms; an image-only PDF 532 ms with `--layout geometry` and 821 ms with the layout model on WebAssembly; a scanned JPEG with the layout model 800 ms. Text error and tables as in the table above for the same path (image-only PDF with the layout model: 0.019 / 0.009). The first run downloads the OCR files, 77.3 MB, into the cache; the layout model adds 173.1 MB once it is published (read from `--layout-model-base` here). That first file took 8.7 s, downloads included.
+On the same Mac with Node.js 24.4.1 (2026-10-20, the 24 test pages above, one process per format, median per file of one page): a printed PDF (text layer) 18 ms; an image-only PDF 532 ms with `--layout geometry` and 821 ms with the layout model on WebAssembly; a scanned JPEG with the layout model 800 ms. Text error and tables as in the table above for the same path (image-only PDF with the layout model: 0.019 / 0.009). The first run downloads the model files and the runtime, 77.3 MB, into the cache; the layout model adds 173.1 MB once it is published (read from `--layout-model-base` here). The first page of that run took 8.7 s, downloads included.
 
 ## MCP
 
@@ -165,7 +173,7 @@ Each detected line is read upright: the image is stretched to 640 x 640 for dete
 
 ## Speed and accuracy
 
-Measured on a Mac Studio (Apple M4 Max), Chrome 155 headless, detector on WebGPU, recognizer on WebAssembly with 12 threads. Time (2026-10-20) = from handing over the image file to the text, with the model loaded. Character error rate (2026-10-19, with the same pipeline; this library reads the same lines and boxes on all 295 images) = the edits between the lines read and the reference lines, matched by their boxes, per reference character; lower is better.
+Measured on a Mac Studio (Apple M4 Max), Chrome 155 headless, detector on WebGPU, recognizer on WebAssembly with 12 threads. Time (2026-10-20) = from handing over the image file to the text, with the model loaded. Character error rate (2026-10-19, measured with the test harness this library was built from; the library returns the same lines and boxes on all 295 images, checked 2026-10-20) = the edits between the lines read and the reference lines, matched by their boxes, per reference character; lower is better.
 
 | Images | Count | Median time | Character error rate |
 |---|---|---|---|
@@ -198,7 +206,7 @@ Without these headers OCR still works, on one thread (several times slower), and
 
 ### Safari and WebGPU
 
-Safari has no WebAssembly relaxed SIMD, which the threaded LiteRT.js build needs, so there WebAssembly runs on 1 thread (WebKit 26.5: 1,823 ms per image against 318 ms in Chrome on the same Mac, table above). The recognizer could run on WebGPU instead, but the published 320-wide recognizer misreads lines there: with LiteRT.js 2.5.3, 376 of 496 test lines read the same as on WebAssembly (Apple M4 Max, Chrome 155, 2026-10-19), the fault reported for PP-OCRv5 in [LiteRT issue #9661](https://github.com/google-ai-edge/LiteRT/issues/9661). A rewritten 320-wide file (`modelInfo.rec320WebGpu`: the attention scores computed in two halves; on WebAssembly it gives exactly the numbers of the published file) reads the same on WebGPU as on WebAssembly on an Apple M4 Max: all 295 test images in Chrome 155, and the 12 images of the table in WebKit 26.5, where it took 249 ms per image, 0.14 times the WebAssembly time. The published 640 and 960 files read the same on WebGPU. The rewritten file is not on Hugging Face yet.
+Safari has no WebAssembly relaxed SIMD, which the threaded LiteRT.js build needs, so there WebAssembly runs on 1 thread (WebKit 26.5: 1,823 ms per image against 318 ms in Chrome on the same Mac, table above). The recognizer could run on WebGPU instead, but the published 320-wide recognizer misreads lines there: with LiteRT.js 2.5.3, 376 of 496 test lines read the same as on WebAssembly (Apple M4 Max, Chrome 155, 2026-10-19), the fault reported for PP-OCRv5 in [LiteRT issue #9661](https://github.com/google-ai-edge/LiteRT/issues/9661). A rewritten 320-wide file (`modelInfo.rec320WebGpu`: the attention scores computed in two halves; on WebAssembly it gives exactly the numbers of the published file) reads the same on WebGPU as on WebAssembly on an Apple M4 Max: all 295 test images in Chrome 155, and the 12 images of the table in WebKit 26.5, where it took 249 ms per image, 0.14 times the WebAssembly time. The published 640 and 960 files read the same on WebGPU on that Mac. The rewritten file is not on Hugging Face yet.
 
 `recognizer: 'auto'` (the default) uses it. Where WebAssembly has 1 thread, a WebGPU device exists and that file is available (published, or given as `modelFiles.rec320`), the worker reads one fixed text line on WebAssembly and on WebGPU at start and moves the recognizer to WebGPU only if every output step is the same; each wider recognizer is checked the same way when it first loads. With that file given, WebKit 26.5 chose WebGPU this way and read the 12 images in 267 ms per image, with the same text as on WebAssembly (2026-10-21). The check reads one line, so it is a coarse guard: given the published 320 file instead (which misreads lines on WebGPU), it saw the difference in Chrome 155 on the Mac (2 of 40 output steps) but not in WebKit 26.5, where that line read the same. Where WebAssembly has threads (Chrome with the two headers above) the recognizer stays on WebAssembly. `worker.info.recognizerReason` and a logger notice say what was chosen and why. On phones WebGPU is not always the better place: in Chrome 155 on a Galaxy S26 the WebGPU recognizer read 13 of 335 lines differently and took longer (843 against 722 ms per image), on a Pixel 8a it read the same text in 0.70 times the time (2026-10-20). The detector reads the same on WebGPU and WebAssembly.
 
@@ -295,7 +303,17 @@ A PNG or JPEG file that ends before its end marker (a download cut short) gets a
 
 ## Tests
 
-`npm install && npm run build && npm test` runs the Node.js tests, the browser tests with the failure paths in headless Chrome (with WebGPU and without it) and in WebKit, the engine of Safari (Playwright's build: WebAssembly on 1 thread), the tesseract.js README example with the import changed (Node.js ESM and CommonJS, and the browser), Deno and Bun smoke tests when they are installed, and the document tests: `convert()` in Node.js and in the browser, the `litert-ocr` command, and the MCP server driven by the MCP SDK client (the document inputs are made by `test/fixtures/make-pdfs.mjs`). Optional environment variables add the cases that need files not published yet: `LITERT_OCR_TEST_REC320` and `LITERT_OCR_TEST_REC320_SHA256` (the WebGPU form of the 320-wide recognizer, for the recognizer cases), `LITERT_OCR_LAYOUT_BASE` (a directory with the layout model files) and `LITERT_OCR_TEST_LLM` (the Gemma 4 E2B web model file, for one `extract()` run). `node test/examples.mjs` builds the examples and reads one image in each (a PDF and a scan in `pdf-to-markdown`), and starts the MCP example's configuration and converts a PDF through it.
+`npm install && npm run build && npm test` runs:
+
+- the Node.js tests;
+- the browser tests with the failure paths in headless Chrome (with WebGPU and without it) and in WebKit, the engine of Safari (Playwright's build: WebAssembly on 1 thread);
+- the tesseract.js README example with the import changed (Node.js ESM and CommonJS, and the browser);
+- Deno and Bun smoke tests when they are installed;
+- the document tests: `convert()` in Node.js and in the browser, the `litert-ocr` command, and the MCP server driven by the MCP SDK client (the document inputs are made by `test/fixtures/make-pdfs.mjs`).
+
+Optional environment variables add the cases that need files not published yet: `LITERT_OCR_TEST_REC320` and `LITERT_OCR_TEST_REC320_SHA256` (the WebGPU form of the 320-wide recognizer, for the recognizer cases), `LITERT_OCR_LAYOUT_BASE` (a directory with the layout model files) and `LITERT_OCR_TEST_LLM` (the Gemma 4 E2B web model file, for one `extract()` run).
+
+`node test/examples.mjs` builds the examples and reads one image in each (a PDF and a scan in `pdf-to-markdown`), and starts the MCP example's configuration and converts a PDF through it.
 
 ## License
 
