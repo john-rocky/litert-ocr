@@ -4,7 +4,9 @@
 //   webkit  Playwright's WebKit (the engine of Safari): no WebAssembly relaxed SIMD, so WebAssembly runs on 1 thread;
 //           WebGPU is there. extract() is not run here (LiteRT-LM JS is tested in Chrome).
 // usage: node test/browser.mjs <webgpu|wasm|webkit> [outfile.json]
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chromium, webkit } from 'playwright';
 import { startServer } from './server.mjs';
 
@@ -45,6 +47,20 @@ async function open(prefix, setup, file = 'page.html') {
   await page.goto(`${origin}/${prefix}/test/browser/${file}`);
   await page.waitForFunction(() => window.testsReady === true, null, { timeout: 30000 });
   return { context, page, consoleLines };
+}
+
+// WebKit: Playwright's throwaway context does not keep Cache API entries from one worker (or page) to the next
+// (r4/r5); Safari keeps website data on disk = a persistent context for the cases that need a second visit.
+async function openPersistent(prefix) {
+  const dir = mkdtempSync(join(tmpdir(), 'litert-ocr-webkit-'));
+  const context = await webkit.launchPersistentContext(dir, { headless: true });
+  const page = context.pages()[0] ?? (await context.newPage());
+  const consoleLines = [];
+  page.on('console', (m) => consoleLines.push(`${m.type()}: ${m.text()}`.slice(0, 400)));
+  page.on('pageerror', (e) => consoleLines.push(`pageerror: ${e.message}`));
+  await page.goto(`${origin}/${prefix}/test/browser/page.html`);
+  await page.waitForFunction(() => window.testsReady === true, null, { timeout: 30000 });
+  return { context, page, consoleLines, dispose: async () => { await context.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
 // The network gone: Chrome = the context offline (navigator.onLine false). WebKit's offline mode also stops blob:
@@ -124,7 +140,7 @@ try {
   // the model files cached in the background after the first result, then the network gone (the same page, a new
   // worker); with prefetch: false the long line needs the 960-wide recognizer, which was never stored
   for (const prefetch of [true, false]) {
-    const pf = await open('coi');
+    const pf = WEBKIT ? await openPersistent('coi') : await open('coi');
     await run(pf.page, 'cacheReset');
     await run(pf.page, 'prefetchFirst', { prefetch }, 240000);
     await run(pf.page, 'offlinePrepare');
@@ -132,7 +148,7 @@ try {
     await run(pf.page, 'prefetchSecond', { expectAll: prefetch }, 300000);
     await offline(pf.context, false);
     consoleLog[`prefetch-${prefetch}`] = pf.consoleLines.slice(0, 60);
-    await pf.context.close();
+    await (pf.dispose ? pf.dispose() : pf.context.close());
   }
 
   // blocked defaults (Hugging Face and jsDelivr unreachable)
@@ -146,6 +162,7 @@ try {
   const off = await open('coi');
   await offline(off.context, true);
   await run(off.page, 'failOffline');
+  await offline(off.context, false);
   await off.context.close();
 
   // not cross-origin isolated: 1 thread and the notice; a tainted cross-origin <img>; recognizer 'auto' with 1 thread

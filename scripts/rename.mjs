@@ -5,7 +5,7 @@
 // to the current GitHub owner and that name. --dry-run lists the files and the replacements without writing. After a
 // rename the script prints `git diff --stat`; then run `npm run build && npm test`.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -71,6 +71,10 @@ const report = [];
 for (const f of files) {
   if (BINARY.test(f) || f === 'scripts/rename.mjs') continue;
   const path = join(ROOT, f);
+  // regular files only (a tracked symlink, or a submodule, is left alone)
+  let st;
+  try { st = lstatSync(path); } catch { continue; }
+  if (!st.isFile()) continue;
   const before = readFileSync(path, 'utf8');
   if (before.includes('\0')) continue;
   const hold = [];

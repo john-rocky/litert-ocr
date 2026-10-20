@@ -462,13 +462,23 @@ window.tests = {
     return expectError(() => ocr.createWorker('eng', 1, local({ cacheMethod: 'none' })), 'MODEL_FETCH_FAILED', ['offline']);
   },
   async failDecode() {
-    const w = await worker();
+    const notices = [];
+    const w = await ocr.createWorker('eng', 1, local({ logger: (m) => m.status === 'notice' && notices.push(m.message) }));
     const png = new Uint8Array(await (await fetch(FIX + 'mobile.png')).arrayBuffer());
-    // the first 200 bytes of a PNG: no image data at all
-    const a = await expectError(() => w.recognize(new Blob([png.slice(0, 200)], { type: 'image/png' })), 'IMAGE_DECODE_FAILED', ['could not decode']);
+    // the first 200 bytes of a PNG, no image data at all: Chrome rejects it (the message says the file is cut short);
+    // WebKit 26.5 hands over an empty image instead (r5) = then the cut-short notice must have said so
+    let a;
+    try {
+      const r = await w.recognize(new Blob([png.slice(0, 200)], { type: 'image/png' }));
+      const said = notices.find((n) => /cut short/.test(n)) ?? null;
+      a = { ok: !!said, read: true, lines: r.data.text.split('\n').filter(Boolean).length, notice: said };
+    } catch (e) {
+      a = { ok: e?.code === 'IMAGE_DECODE_FAILED' && /could not decode/.test(e?.message) && /cut short/.test(e?.message), code: e?.code, message: e?.message };
+    }
     const b = await expectError(() => w.recognize(new Blob(['hello, not an image'], { type: 'text/plain' })), 'IMAGE_DECODE_FAILED', ['PNG, JPEG']);
     const still = (await w.recognize(FIX + 'mobile.png')).data.text.length > 20;
-    return { ok: a.ok && b.ok && still, truncated: a.message, text: b.message, workerStillWorks: still };
+    await w.terminate();
+    return { ok: a.ok && b.ok && still, truncated: a, text: b.message, workerStillWorks: still };
   },
   async failType() {
     const w = await worker();
