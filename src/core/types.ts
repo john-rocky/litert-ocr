@@ -144,8 +144,11 @@ export interface OutputFormats {
 
 /**
  * Logger messages. `status` is one of: 'loading runtime', 'loading model', 'initializing model',
- * 'initialized', 'recognizing text', 'notice'. A 'notice' carries `message` (a fallback taken, a
- * parameter ignored, an image resized). 'loading runtime' and 'loading model' carry byte counts.
+ * 'initialized', 'recognizing text', 'caching model', 'notice'. A 'notice' carries `message` (a fallback taken, a
+ * parameter ignored, an image resized). 'loading runtime', 'loading model' and 'caching model' carry byte counts:
+ * `file` is the file whose bytes just arrived; `loaded` / `total` count all the files of that step together (the
+ * start files load as one step). 'caching model' = the model files not needed yet, downloaded into the cache after
+ * the first result (see `prefetch`); its last message has progress 1 and says whether every file is cached.
  */
 export interface LoggerMessage {
   workerId: string;
@@ -184,17 +187,32 @@ export interface WorkerOptions {
   /** Browser: URL of this package's dist/worker.js to start instead of the built-in blob worker (CSP without blob:). */
   workerPath: string;
   /**
-   * 'wasm' (default): the recognizer runs on WebAssembly, as measured. 'webgpu' (experimental): the 640 / 960
-   * recognizers run on WebGPU (the published files read the same as on WebAssembly with LiteRT.js 2.5.3); the
-   * 320 one only when modelFiles.rec320 replaces the published file, which misreads lines on WebGPU (LiteRT
-   * issue #9661), with one that does not. Falls back to WebAssembly, with a notice, where WebGPU fails.
+   * Where the recognizers run.
+   * 'auto' (default): WebAssembly, except where WebAssembly runs on 1 thread (no relaxed SIMD, as in Safari, or a page
+   *   that is not cross-origin isolated), a WebGPU device exists and the WebGPU form of the 320-wide recognizer is
+   *   available (modelInfo.rec320WebGpu: not published yet, so only when modelFiles.rec320 gives it). Then one fixed
+   *   text line is read on both WebAssembly and WebGPU at start, and on each wider recognizer when it first loads: the
+   *   recognizer moves to WebGPU only if the outputs are the same. worker.info.recognizerReason says what was chosen
+   *   and why; the logger gets the same as a notice.
+   * 'wasm': always WebAssembly (the measured default where WebAssembly has threads).
+   * 'webgpu' (experimental): the 640 / 960 recognizers on WebGPU, the 320 one only with modelFiles.rec320 (the
+   *   published file misreads lines on WebGPU, LiteRT issue #9661); no check. Falls back to WebAssembly, with a
+   *   notice, where WebGPU fails.
    */
-  recognizer: 'wasm' | 'webgpu';
+  recognizer: 'auto' | 'wasm' | 'webgpu';
   /**
    * false (default): the 640 / 960 recognizers (about 21.5 MB each) load the first time a line needs them.
-   * true: load all five model files at start (for offline use after the first visit).
+   * true: load all five model files at start.
    */
   eager: boolean;
+  /**
+   * Browser default true: after the first result, the model files not loaded yet (the 640 / 960 recognizers) are
+   * downloaded in the background into the cache, so a later visit can read any image offline (the logger reports it
+   * as 'caching model'). It starts only after a result, so the first result is not delayed, and it is skipped when
+   * the browser asks to save data (Save-Data) or there is no cache. Node.js, Deno and Bun default false (a short
+   * process would stop the download half-way); false: those files load when a line needs them.
+   */
+  prefetch: boolean;
   /**
    * 'auto': detector on WebGPU when it compiles, else WebAssembly (the browser default). 'wasm': WebAssembly only
    * (the default in Node.js, Deno and Bun; Deno has WebGPU, pass 'auto' to try it there).
@@ -228,13 +246,20 @@ export interface WorkerInfo {
   /** Where the text detector runs: 'webgpu' or 'wasm'. */
   detector: 'webgpu' | 'wasm';
   /**
-   * Where the recognizers run: 'wasm' by default (on WebGPU the published 320-wide file misreads lines, LiteRT
-   * issue #9661); 'webgpu' or 'mixed' only with the recognizer option. Per width in `recognizers` (640 / 960
-   * load on first use, so theirs is the plan until then).
+   * Where the recognizers run: 'wasm' unless the recognizer option moved them (see WorkerOptions.recognizer); per
+   * width in `recognizers` (640 / 960 load on first use, so theirs is the plan until then).
    */
   recognizer: 'wasm' | 'webgpu' | 'mixed';
   recognizers: { '320': 'wasm' | 'webgpu'; '640': 'wasm' | 'webgpu'; '960': 'wasm' | 'webgpu' };
-  /** WebAssembly threads used (1 when the page is not cross-origin isolated). */
+  /** Why the recognizers run where they do (one sentence; recognizer 'auto' names the check and its result). */
+  recognizerReason: string;
+  /**
+   * The start check of recognizer 'auto' (one fixed line read on WebAssembly and on WebGPU by the 320-wide
+   * recognizer): output steps compared, how many differ, the time, and the line as WebAssembly read it; null when
+   * no check ran.
+   */
+  recognizerCheck: { width: number; steps: number; differing: number; ms: number; text: string } | null;
+  /** WebAssembly threads used (1 when the page is not cross-origin isolated, or the browser has no WebAssembly relaxed SIMD, as Safari). */
   threads: number;
   runtime: string;
   model: string;

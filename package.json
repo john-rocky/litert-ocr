@@ -2,8 +2,33 @@
   "name": "litert-ocr",
   "version": "0.1.0",
   "private": true,
-  "description": "OCR and documents to Markdown in the browser and Node.js: the tesseract.js API for photos and screenshots, PDFs and scans to Markdown with tables, JSON or text, a CLI and an MCP server; PP-OCRv6-Small and a page layout model on LiteRT.js (WebGPU or WebAssembly).",
+  "description": "OCR in the browser and Node.js with the tesseract.js API: PP-OCRv6-Small on LiteRT.js (WebGPU or WebAssembly), images never leave the device. PDFs, scans and photos to Markdown with tables, JSON or text; a CLI and an MCP server.",
+  "keywords": [
+    "ocr",
+    "tesseract",
+    "tesseract.js",
+    "text-recognition",
+    "pdf-to-markdown",
+    "markdown",
+    "pdf",
+    "paddleocr",
+    "pp-ocr",
+    "litert",
+    "webgpu",
+    "webassembly",
+    "offline",
+    "mcp"
+  ],
   "license": "Apache-2.0",
+  "author": "john-rocky",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/john-rocky/litert-ocr.git"
+  },
+  "homepage": "https://github.com/john-rocky/litert-ocr#readme",
+  "bugs": {
+    "url": "https://github.com/john-rocky/litert-ocr/issues"
+  },
   "type": "module",
   "main": "./dist/node.js",
   "browser": "./dist/index.js",

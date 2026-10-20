@@ -305,8 +305,11 @@ function buildInit(options: Partial<WorkerOptions>, main: MainPlatform): InitOpt
   // Node.js / Deno / Bun: WebAssembly unless asked (Deno has WebGPU; it is opt-in there, not the default)
   const backend = options.backend ?? (main.name === 'node' ? 'wasm' : 'auto');
   if (backend !== 'auto' && backend !== 'wasm') throw new OcrError('INVALID_ARGUMENT', `options.backend must be 'auto' or 'wasm', got ${JSON.stringify(backend)}.`);
-  const recognizer = options.recognizer ?? 'wasm';
-  if (recognizer !== 'wasm' && recognizer !== 'webgpu') throw new OcrError('INVALID_ARGUMENT', `options.recognizer must be 'wasm' or 'webgpu', got ${JSON.stringify(recognizer)}.`);
+  const recognizer = options.recognizer ?? 'auto';
+  if (recognizer !== 'auto' && recognizer !== 'wasm' && recognizer !== 'webgpu') throw new OcrError('INVALID_ARGUMENT', `options.recognizer must be 'auto', 'wasm' or 'webgpu', got ${JSON.stringify(recognizer)}.`);
+  // a short Node.js process would stop a background download half-way: there the files load when a line needs them
+  const prefetch = options.prefetch ?? main.name === 'browser';
+  if (typeof prefetch !== 'boolean') throw new OcrError('INVALID_ARGUMENT', `options.prefetch must be true or false, got ${JSON.stringify(prefetch)}.`);
   const cacheMethod: CacheMethod = options.cacheMethod ?? 'write';
   if (!['write', 'readOnly', 'refresh', 'none'].includes(cacheMethod)) throw new OcrError('INVALID_ARGUMENT', `options.cacheMethod must be 'write', 'readOnly', 'refresh' or 'none', got ${JSON.stringify(cacheMethod)}.`);
   const modelFiles: InitOptions['modelFiles'] = {};
@@ -327,8 +330,11 @@ function buildInit(options: Partial<WorkerOptions>, main: MainPlatform): InitOpt
     recognizer,
     cacheMethod,
     eager: options.eager === true,
+    prefetch,
     layoutBase: options.layoutModelBase ? dir(main.resolveUrl(options.layoutModelBase)) : LAYOUT_BASE,
   };
+  // tests only (not in WorkerOptions): make the start check of recognizer 'auto' see different outputs
+  if ((options as Record<string, unknown>)._recognizerCheck === 'mismatch') o.recognizerCheck = 'mismatch';
   const lb = options.layoutBackend ?? 'auto';
   if (lb !== 'auto' && lb !== 'wasm') throw new OcrError('INVALID_ARGUMENT', `options.layoutBackend must be 'auto' or 'wasm', got ${JSON.stringify(lb)}.`);
   if (lb === 'wasm') o.layoutBackend = 'wasm';

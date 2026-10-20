@@ -4,7 +4,7 @@
 // threaded glue runs from a .cjs copy so its pthread workers load it as CommonJS too.
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { availableParallelism, homedir } from 'node:os';
@@ -12,6 +12,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parentPort } from 'node:worker_threads';
 import * as litert from '@litertjs/core';
+import { CUT_HINT, cutShort } from '../core/cutshort.js';
 import { OcrError, errText } from '../core/errors.js';
 import { createHandler, type Platform, type Prepared } from '../core/handler.js';
 import { LITERT_FILES, PKG_NAME, litertPrint, type RuntimeVariant } from '../core/models.js';
@@ -28,7 +29,8 @@ const MAX_THREADS = 12;
 export function cacheDir(o: Pick<InitOptions, 'cachePath'>): string {
   if (o.cachePath) return resolve(o.cachePath);
   const xdg = process.env.XDG_CACHE_HOME;
-  return join(xdg && isAbsolute(xdg) ? xdg : join(homedir(), '.cache'), PKG_NAME);
+  // the package name without an npm scope: one directory
+  return join(xdg && isAbsolute(xdg) ? xdg : join(homedir(), '.cache'), PKG_NAME.replace(/^@[^/]+\//, ''));
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -117,6 +119,14 @@ const platform: Platform<Raster> = {
         writeFileSync(tmp, bytes);
         renameSync(tmp, f);
       },
+      async has(key, bytes) {
+        if (isLocal(key)) return false;
+        try {
+          return !bytes || statSync(name(key)).size === bytes;
+        } catch {
+          return false;
+        }
+      },
     };
   },
 
@@ -128,7 +138,7 @@ const platform: Platform<Raster> = {
     return readFile(p).then((b) => new Uint8Array(b.buffer, b.byteOffset, b.byteLength));
   },
 
-  async decode(image: WireImage) {
+  async decode(image: WireImage, onCut) {
     let bytes: Uint8Array;
     switch (image.kind) {
       case 'pixels': {
@@ -164,6 +174,8 @@ const platform: Platform<Raster> = {
       case 'bitmap':
         throw new OcrError('IMAGE_UNSUPPORTED_TYPE', 'ImageBitmap is a browser type; in Node.js pass a file path, Buffer or { data, width, height }.');
     }
+    const cut = cutShort(bytes);
+    if (cut) onCut?.(`${cut} ${CUT_HINT}`);
     return { src: decodeBytes(bytes), release: () => {} };
   },
 

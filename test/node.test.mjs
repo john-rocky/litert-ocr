@@ -55,6 +55,10 @@ describe('node: reading', () => {
     assert.equal(worker.info.platform, process.versions.bun ? 'bun' : globalThis.Deno ? 'deno' : 'node');
     assert.equal(worker.info.detector, 'wasm');
     assert.ok(worker.info.threads >= 1);
+    // recognizer 'auto' (the default): WebAssembly with threads, no check
+    assert.equal(worker.info.recognizer, 'wasm');
+    assert.match(worker.info.recognizerReason, /threads here/);
+    assert.equal(worker.info.recognizerCheck, null);
     report.info = worker.info;
   });
 
@@ -160,6 +164,8 @@ describe('node: reading', () => {
   test('logger statuses', () => {
     const seen = new Set(log.map((m) => m.status));
     for (const s of ['loading runtime', 'loading model', 'initializing model', 'initialized', 'recognizing text']) assert.ok(seen.has(s), `no '${s}' in ${[...seen]}`);
+    // Node.js does not download the later model files in the background (prefetch is a browser default)
+    assert.ok(!seen.has('caching model'), 'no background caching in Node.js');
     report.initialized = log.find((m) => m.status === 'initialized')?.message;
   });
 });
@@ -180,6 +186,30 @@ describe('node: failure paths', () => {
     report.gifMessage = e.message;
     await rejects(() => worker.recognize(`http://127.0.0.1:${server.port}/plain/test/fixtures/nope.png`), 'IMAGE_FETCH_FAILED', ['HTTP 404']);
     assert.match((await worker.recognize(join(FIX, 'mobile.png'))).data.text, /Electricity Bill/, 'worker still works');
+  });
+
+  test('a PNG or JPEG cut short: a notice, and the decoder decides', async () => {
+    const notices = [];
+    const w = await createWorker('eng', 1, { logger: (m) => m.status === 'notice' && notices.push(m.message) });
+    const png = readFileSync(join(FIX, 'mobile.png'));
+    const jpg = readFileSync(join(FIX, 'dialog-shared.jpg'));
+    await rejects(() => w.recognize(png.subarray(0, png.length >> 1)), 'IMAGE_DECODE_FAILED');
+    assert.ok(notices.some((n) => /ends before its IEND chunk/.test(n) && /cut short/.test(n)), `PNG notice: ${JSON.stringify(notices)}`);
+    const n0 = notices.length;
+    let jpegHalf;
+    try {
+      jpegHalf = `read ${(await w.recognize(jpg.subarray(0, jpg.length >> 1))).data.text.split('\n').filter(Boolean).length} lines`;
+    } catch (e) {
+      assert.equal(e.code, 'IMAGE_DECODE_FAILED', e.message);
+      jpegHalf = `${e.code}: ${e.message}`;
+    }
+    assert.ok(notices.slice(n0).some((n) => /ends before its end marker/.test(n)), `JPEG notice: ${JSON.stringify(notices.slice(n0))}`);
+    const n1 = notices.length;
+    await w.recognize(png);
+    await w.recognize(Buffer.concat([jpg, Buffer.alloc(4096, 7)]));
+    assert.equal(notices.slice(n1).filter((n) => /cut short/.test(n)).length, 0, 'no notice for whole files');
+    await w.terminate();
+    report.cutShort = { pngNotice: notices.find((n) => /IEND/.test(n)), jpegHalf };
   });
 
   test('model download fails / sha256 mismatch', async () => {

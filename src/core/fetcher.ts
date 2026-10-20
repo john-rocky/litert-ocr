@@ -16,6 +16,8 @@ export interface FileSpec {
 export interface FileCache {
   get(key: string): Promise<Uint8Array | null>;
   put(key: string, bytes: Uint8Array): Promise<void>;
+  /** Whether the cache holds the file (of this size), without reading it. */
+  has?(key: string, bytes?: number): Promise<boolean>;
 }
 
 export type CacheMethod = 'write' | 'readOnly' | 'refresh' | 'none';
@@ -31,6 +33,11 @@ export interface FetchContext {
   readLocal?: (url: string) => Promise<Uint8Array> | null;
   /** The option to name in messages for serving the file yourself. */
   selfHostOption: 'modelBase' | 'wasmPath' | 'layoutModelBase' | 'pdfjsPath';
+  /**
+   * When the file is loaded: 'start' (createWorker loads it; default) or the sentence that says when a file loaded
+   * later is needed (a recognizer loaded the first time a line needs it), for the offline and retry hints.
+   */
+  needed?: string;
 }
 
 const isOffline = () => typeof navigator !== 'undefined' && (navigator as { onLine?: boolean }).onLine === false;
@@ -91,6 +98,10 @@ async function download(spec: FileSpec, ctx: FetchContext, total: number): Promi
   const host = (() => {
     try { return new URL(url).host; } catch { return url; }
   })();
+  // what the network is needed for: the start files once, then the cache; a file loaded later was perhaps never stored
+  const offlineHint = ctx.needed
+    ? `${ctx.needed} For offline use, call createWorker() once online with { eager: true }: all five model files load at start and stay in the cache.`
+    : 'The first createWorker() needs the network once; later runs read the cache.';
   let resp: Response;
   try {
     resp = await fetch(url, { credentials: 'omit' });
@@ -98,13 +109,13 @@ async function download(spec: FileSpec, ctx: FetchContext, total: number): Promi
     if (isOffline()) {
       throw new OcrError(
         'MODEL_FETCH_FAILED',
-        `Could not download ${spec.name} from ${url}: this device is offline. The first createWorker() needs the network once; later runs read the cache. To serve the files yourself, pass { ${ctx.selfHostOption}: '<your URL>/' }.`,
+        `Could not download ${spec.name} from ${url}: this device is offline. ${offlineHint} To serve the files yourself, pass { ${ctx.selfHostOption}: '<your URL>/' }.`,
         { url, cause: e },
       );
     }
     throw new OcrError(
       'MODEL_FETCH_FAILED',
-      `Could not download ${spec.name} from ${url}: the request did not complete (${errText(e)}). Either this device is offline (the first createWorker() needs the network once; later runs read the cache) or the request was blocked: check that ${host} is allowed by the page's Content-Security-Policy connect-src, a firewall or an extension. To serve the files yourself, copy them from ${spec.origin} and pass { ${ctx.selfHostOption}: '<your URL>/' }.`,
+      `Could not download ${spec.name} from ${url}: the request did not complete (${errText(e)}). Either this device is offline or the request was blocked (check that ${host} is allowed by the page's Content-Security-Policy connect-src, a firewall or an extension). ${offlineHint} To serve the files yourself, copy them from ${spec.origin} and pass { ${ctx.selfHostOption}: '<your URL>/' }.`,
       { url, cause: e },
     );
   }
@@ -130,7 +141,8 @@ async function download(spec: FileSpec, ctx: FetchContext, total: number): Promi
     try {
       r = await reader.read();
     } catch (e) {
-      throw new OcrError('MODEL_FETCH_FAILED', `The download of ${spec.name} from ${url} broke off after ${loaded} bytes (${errText(e)}). Retry createWorker(); a partial file is never cached.`, { url, cause: e });
+      const retry = ctx.needed ? 'The next line that needs it tries again' : 'Retry createWorker()';
+      throw new OcrError('MODEL_FETCH_FAILED', `The download of ${spec.name} from ${url} broke off after ${loaded} bytes (${errText(e)}). ${retry}; a partial file is never cached.`, { url, cause: e });
     }
     if (r.done) break;
     chunks.push(r.value);

@@ -8,6 +8,7 @@ import { OcrError, errText } from './errors.js';
 import { MODEL_FILES, VOCAB_SIZE, type ModelRole } from './models.js';
 import { DET_SIZE } from './db.js';
 import { REC_H, readPage, type RasterOps, type ReadOptions, type RecWidth, type Runners } from './pipeline.js';
+import { probeInput } from './probe.js';
 
 type LiteRt = typeof LiteRtModule;
 type Compiled = Awaited<ReturnType<LiteRt['loadAndCompile']>>;
@@ -22,12 +23,16 @@ export interface EngineInit {
   numThreads: number;
   backend: 'auto' | 'wasm';
   /**
-   * 'wasm' (default): every recognizer on WebAssembly. 'webgpu': the 640 / 960 recognizers on WebGPU (the
-   * published files read the same there), the 320 one only when rec320Safe (a file given in place of the
-   * published one, which misreads on WebGPU: LiteRT issue #9661).
+   * 'auto' (default): WebAssembly, or WebGPU where WebAssembly has 1 thread, a WebGPU device exists, rec320Safe holds
+   * and a fixed line reads the same on both (checked per width when it loads). 'wasm': every recognizer on
+   * WebAssembly. 'webgpu': the 640 / 960 recognizers on WebGPU (the published files read the same there), the 320 one
+   * only when rec320Safe, no check.
    */
-  recognizer?: 'wasm' | 'webgpu';
+  recognizer?: 'auto' | 'wasm' | 'webgpu';
+  /** The 320-wide file is one that WebGPU reads correctly (not the published file, which misreads: LiteRT issue #9661). */
   rec320Safe?: boolean;
+  /** Tests only: the check sees one output step changed on WebGPU. */
+  checkHook?: 'mismatch';
   notice: (message: string, level?: 'info' | 'warn') => void;
   /** Compile progress 0..1 and a label of the step. */
   progress: (p: number, step: string) => void;
@@ -36,6 +41,25 @@ export interface EngineInit {
 export interface EngineTimings {
   compileMs: Record<string, number>;
   warmupMs: Record<string, number>;
+}
+
+export interface RecognizerCheck {
+  width: number;
+  /** Output steps compared (argmax per step). */
+  steps: number;
+  differing: number;
+  ms: number;
+  /** The check line as WebAssembly read it. */
+  text: string;
+}
+
+/** WebGPU can run here: the API exists and LiteRT.js opened a device for it (a browser without a GPU has the API but no device). */
+export function webGpuUsable(litert: LiteRt): boolean {
+  try {
+    return litert.isWebGPUSupported() && litert.getWebGpuDevice() != null;
+  } catch {
+    return false;
+  }
 }
 
 export class Engine {
@@ -48,16 +72,22 @@ export class Engine {
   private det!: Compiled;
   detector: 'webgpu' | 'wasm' = 'wasm';
   chars!: string[];
+  /** recognizer 'auto': the start check passed, so the wider recognizers go to WebGPU too (each checked when it loads). */
+  autoGpu = false;
+  /** Why the recognizers run where they do (worker.info.recognizerReason). */
+  recognizerReason = '';
+  /** The start check of recognizer 'auto' (null when it did not run). */
+  recognizerCheck: RecognizerCheck | null = null;
 
   private constructor(private readonly init: EngineInit) {}
 
-  /** WebGPU can run here: the API exists and LiteRT.js opened a device for it (a browser without a GPU has the API but no device). */
   get gpuUsable(): boolean {
-    try {
-      return this.init.litert.isWebGPUSupported() && this.init.litert.getWebGpuDevice() != null;
-    } catch {
-      return false;
-    }
+    return webGpuUsable(this.init.litert);
+  }
+
+  /** This width's recognizer is loaded or loading. */
+  hasRecognizer(width: RecWidth): boolean {
+    return this.recs.has(width) || this.pending.has(width);
   }
 
   static async create(init: EngineInit): Promise<Engine> {
@@ -85,7 +115,7 @@ export class Engine {
   }
 
   private async start(): Promise<void> {
-    const { litert, notice } = this.init;
+    const { notice } = this.init;
     let chars: unknown;
     try {
       chars = JSON.parse(new TextDecoder().decode(this.init.characters));
@@ -97,10 +127,20 @@ export class Engine {
     }
     this.chars = chars as string[];
     this.init.progress(0, 'recognizer 320');
-    if (this.init.recognizer === 'webgpu' && !this.init.rec320Safe) {
-      notice('The 320-wide recognizer stays on WebAssembly: the published file misreads lines on WebGPU (LiteRT issue #9661). The 640 / 960 ones use WebGPU.');
+    const mode = this.init.recognizer ?? 'auto';
+    if (mode === 'auto') {
+      this.recs.set(320, await this.startAuto());
+    } else {
+      if (mode === 'webgpu' && !this.init.rec320Safe) {
+        notice('The 320-wide recognizer stays on WebAssembly: the published file misreads lines on WebGPU (LiteRT issue #9661). The 640 / 960 ones use WebGPU.');
+      }
+      this.recs.set(320, await this.compileRec(320, this.init.rec320));
+      this.recognizerReason = mode === 'wasm'
+        ? 'recognizer: "wasm" was asked, so the recognizers run on WebAssembly.'
+        : this.recBackends[320] === 'webgpu'
+          ? 'recognizer: "webgpu" was asked: the recognizers run on WebGPU (not checked against WebAssembly).'
+          : `recognizer: "webgpu" was asked: ${this.gpuUsable ? 'the 640 / 960 recognizers run on WebGPU, the 320-wide one on WebAssembly (the published file misreads lines on WebGPU)' : 'there is no WebGPU device here, so the recognizers run on WebAssembly'}.`;
     }
-    this.recs.set(320, await this.compileRec(320, this.init.rec320));
     this.init.progress(0.5, 'detector');
     let det: Compiled | null = null;
     if (this.init.backend !== 'wasm' && this.gpuUsable) {
@@ -128,14 +168,100 @@ export class Engine {
   }
 
   /**
-   * Compile a recognizer. The default is WebAssembly (the measured pipeline: on WebGPU the published 320 file
-   * misreads lines, LiteRT issue #9661). With recognizer 'webgpu' the 640 / 960 files (and a 320 file given
-   * in modelFiles.rec320) go to WebGPU when it compiles there.
+   * recognizer 'auto' at start: WebAssembly unless WebAssembly has 1 thread, a WebGPU device exists and the 320-wide
+   * file is one WebGPU reads correctly; then the fixed line is read on both and WebGPU is used only if every output
+   * step (the argmax over the vocabulary) is the same.
    */
-  private async compileRec(width: RecWidth, bytes: Uint8Array): Promise<Compiled> {
+  private async startAuto(): Promise<Compiled> {
+    const { numThreads } = this.init;
+    const wasmOnly = (reason: string) => {
+      this.recognizerReason = reason;
+      return this.compileRec(320, this.init.rec320, 'wasm');
+    };
+    if (numThreads > 1) return wasmOnly(`WebAssembly runs on ${numThreads} threads here, so the recognizers run on WebAssembly.`);
+    if (!this.gpuUsable) return wasmOnly('WebAssembly runs on 1 thread here and there is no WebGPU device, so the recognizers run on WebAssembly.');
+    if (!this.init.rec320Safe) {
+      return wasmOnly('WebAssembly runs on 1 thread here, but the WebGPU form of the 320-wide recognizer is not published yet (modelInfo.rec320WebGpu; pass it as modelFiles.rec320), so the recognizers run on WebAssembly.');
+    }
+    const r = await this.checkWidth(320, this.init.rec320);
+    if (!r.check) {
+      this.recognizerReason = `WebAssembly runs on 1 thread here, but WebGPU could not run the recognizer (${r.error}), so the recognizers run on WebAssembly.`;
+      return r.model;
+    }
+    this.recognizerCheck = r.check;
+    if (r.backend === 'webgpu') {
+      this.autoGpu = true;
+      this.recognizerReason = `WebAssembly runs on 1 thread here, and the WebGPU recognizer read the check line exactly as WebAssembly (${r.check.steps} of ${r.check.steps} output steps), so the recognizers run on WebGPU.`;
+    } else {
+      this.recognizerReason = `WebAssembly runs on 1 thread here, but the WebGPU recognizer read the check line differently from WebAssembly (${r.check.differing} of ${r.check.steps} output steps), so the recognizers run on WebAssembly.`;
+    }
+    return r.model;
+  }
+
+  /**
+   * The check of recognizer 'auto' for one width: compile the file on WebAssembly and on WebGPU, read the fixed line
+   * (padded to the width) on both, keep WebGPU only if every output step's argmax is the same. The other model is
+   * deleted after it ran (a WebGPU model deleted before its first run can stall LiteRT.js for tens of seconds).
+   */
+  private async checkWidth(width: RecWidth, bytes: Uint8Array): Promise<{ model: Compiled; backend: 'wasm' | 'webgpu'; check: RecognizerCheck | null; error?: string }> {
     const role = `rec${width}` as ModelRole;
     const shape = [1, 3, REC_H, width];
-    const gpu = this.init.recognizer === 'webgpu' && this.gpuUsable && (width !== 320 || this.init.rec320Safe === true);
+    const t0 = performance.now();
+    const wasm = await this.compile(role, bytes, 'wasm');
+    await this.warm(role, wasm, shape);
+    let gpu: Compiled | null = null;
+    try {
+      gpu = await this.compile(role, bytes, 'webgpu');
+      const acc = (gpu as { options?: { accelerator?: string } }).options?.accelerator ?? 'webgpu';
+      if (acc !== 'webgpu') throw new Error(`compiled for ${acc}`);
+      await this.warm(`${role}:webgpu`, gpu, shape);
+    } catch (e) {
+      try { gpu?.delete(); } catch { /* ignore */ }
+      this.recBackends[width] = 'wasm';
+      return { model: wasm, backend: 'wasm', check: null, error: errText(e) };
+    }
+    const input = probeInput(width);
+    const C = this.chars.length;
+    const a = argmaxSteps(await runModel(this.init.litert, wasm, input, shape), C);
+    const b = argmaxSteps(await runModel(this.init.litert, gpu, input, shape), C);
+    if (this.init.checkHook === 'mismatch' && b.length) b[0] = (b[0]! + 1) % C;
+    let differing = Math.abs(a.length - b.length);
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) differing++;
+    // the line as WebAssembly read it (greedy CTC: repeats collapsed, blanks dropped)
+    let text = '';
+    for (let i = 0, prev = -1; i < a.length; prev = a[i]!, i++) if (a[i] !== 0 && a[i] !== prev) text += this.chars[a[i]!];
+    const check: RecognizerCheck = { width, steps: a.length, differing, ms: performance.now() - t0, text };
+    if (differing === 0) {
+      try { wasm.delete(); } catch { /* ignore */ }
+      this.recBackends[width] = 'webgpu';
+      this.gpuRecBytes.set(width, bytes);
+      return { model: gpu, backend: 'webgpu', check };
+    }
+    try { gpu.delete(); } catch { /* ignore */ }
+    this.recBackends[width] = 'wasm';
+    return { model: wasm, backend: 'wasm', check };
+  }
+
+  /**
+   * Compile a recognizer. The default is WebAssembly (the measured pipeline: on WebGPU the published 320 file
+   * misreads lines, LiteRT issue #9661). With recognizer 'webgpu' the 640 / 960 files (and a 320 file given
+   * in modelFiles.rec320) go to WebGPU when it compiles there; with 'auto' a wider recognizer goes to WebGPU after
+   * the start check passed and its own check passes.
+   */
+  private async compileRec(width: RecWidth, bytes: Uint8Array, force?: 'wasm'): Promise<Compiled> {
+    const role = `rec${width}` as ModelRole;
+    const shape = [1, 3, REC_H, width];
+    const mode = this.init.recognizer ?? 'auto';
+    if (!force && mode === 'auto' && this.autoGpu && width !== 320) {
+      const r = await this.checkWidth(width, bytes);
+      if (r.backend === 'wasm') {
+        this.init.notice(r.check
+          ? `The ${width}-wide recognizer read the check line differently on WebGPU (${r.check.differing} of ${r.check.steps} output steps), so it runs on WebAssembly.`
+          : `WebGPU could not run the ${width}-wide recognizer (${r.error}); it runs on WebAssembly.`);
+      }
+      return r.model;
+    }
+    const gpu = !force && mode === 'webgpu' && this.gpuUsable && (width !== 320 || this.init.rec320Safe === true);
     if (gpu) {
       try {
         const m = await this.compile(role, bytes, 'webgpu');
@@ -148,7 +274,7 @@ export class Engine {
       } catch (e) {
         this.init.notice(`WebGPU could not run the ${width}-wide recognizer (${errText(e)}); it runs on WebAssembly.`);
       }
-    } else if (this.init.recognizer === 'webgpu' && !this.gpuUsable && width === 320) {
+    } else if (!force && mode === 'webgpu' && !this.gpuUsable && width === 320) {
       this.init.notice('WebGPU is not available here; the recognizer runs on WebAssembly.');
     }
     const m = await this.compile(role, bytes, 'wasm');
@@ -222,6 +348,22 @@ export class Engine {
     }
     this.recs.clear();
   }
+}
+
+/** Argmax over the vocabulary for each output step of a recognizer (probabilities [T, C]). */
+function argmaxSteps(probs: Float32Array, C: number): Int32Array {
+  const T = probs.length / C;
+  const out = new Int32Array(T);
+  for (let t = 0; t < T; t++) {
+    const off = t * C;
+    let best = 0, bv = probs[off]!;
+    for (let c = 1; c < C; c++) {
+      const v = probs[off + c]!;
+      if (v > bv) { bv = v; best = c; }
+    }
+    out[t] = best;
+  }
+  return out;
 }
 
 async function runModel(litert: LiteRt, model: Compiled, nchw: Float32Array, shape: number[]): Promise<Float32Array> {

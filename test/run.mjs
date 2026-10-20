@@ -1,9 +1,12 @@
-// npm test: Node tests, browser tests (WebGPU and WebAssembly modes), the tesseract.js README example with
-// one line changed (Node ESM, Node CommonJS, browser), the blocks example, Deno / Bun smoke runs, and the document
-// tests (convert / toMarkdown in Node, the litert-ocr command and its MCP server).
-//   node test/run.mjs [node|doc|cli|browser|compat|runtimes ...]   (default: all)
+// npm test: Node tests, browser tests (Chrome with and without WebGPU, and WebKit = Safari's engine), the tesseract.js
+// README example with one line changed (Node ESM, Node CommonJS, browser), the blocks example, Deno / Bun smoke runs,
+// and the document tests (convert / toMarkdown in Node, the litert-ocr command and its MCP server).
+//   node test/run.mjs [node|doc|cli|browser|chrome|webkit|compat|runtimes ...]   (default: all; browser = the three
+//   browser modes, chrome = the two Chrome modes, webkit = WebKit only)
 // Logs go to $LOG_DIR (default test/out/). Optional: $LITERT_OCR_LAYOUT_BASE = a directory with the layout model
-// files (not published yet), $LITERT_OCR_TEST_LLM = the Gemma 4 E2B web model file for the extract() case.
+// files (not published yet), $LITERT_OCR_TEST_LLM = the Gemma 4 E2B web model file for the extract() case,
+// $LITERT_OCR_TEST_REC320 (+ _SHA256) = the WebGPU form of the 320-wide recognizer (not published yet) for the
+// recognizer cases.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -97,8 +100,10 @@ if (parts.includes('compat')) {
   }
 }
 
-if (parts.includes('browser')) {
-  for (const mode of ['webgpu', 'wasm']) {
+if (parts.includes('browser') || parts.includes('chrome') || parts.includes('webkit')) {
+  // Chrome with WebGPU, Chrome without it, and WebKit (Safari's engine: WebAssembly on 1 thread)
+  const modes = [...(parts.includes('browser') || parts.includes('chrome') ? ['webgpu', 'wasm'] : []), ...(parts.includes('browser') || parts.includes('webkit') ? ['webkit'] : [])];
+  for (const mode of modes) {
     step(`browser-${mode}`, process.execPath, ['test/browser.mjs', mode, join(LOG, `browser-${mode}.json`)], {
       check: (out) => [/BROWSER \w+: (\d+)\/\1 PASS/.test(out), /BROWSER \w+: (\d+\/\d+ PASS)/.exec(out)?.[1] ?? ''],
     });

@@ -90,6 +90,8 @@ window.tests = {
     return { ok: true, info: w.info, initialized, notices, crossOriginIsolated: self.crossOriginIsolated, ua: navigator.userAgent, hc: navigator.hardwareConcurrency };
   },
 
+  // threshold: share of the expected lines read exactly (the runner passes 0.85 for WebKit, which draws image pixels
+  // differently from Chrome: r4 measured 287 of 335 lines identical to Chrome on 12 images, the WebAssembly code is the same)
   async fixtures({ threshold = 0.95 } = {}) {
     const exp = await fixtures();
     const w = await worker();
@@ -133,7 +135,7 @@ window.tests = {
     return { ok: Object.values(checks).every(Boolean), checks, nLines: lines.length, nWords: words.length, firstWord: words[0], version: d.version };
   },
 
-  async inputs() {
+  async inputs({ close = 0.95 } = {}) {
     const w = await worker();
     const url = FIX + 'mobile.png';
     const base = (await w.recognize(url)).data.text;
@@ -166,7 +168,7 @@ window.tests = {
           // a GPU-backed canvas can hand over slightly different pixels than the decoded file: then the
           // expected lines must still be read (>= 95 %), and the differing lines are recorded
           const m = lineMatch(t, want);
-          out[k] = m.rate >= 0.95 ? 'close' : 'DIFFERENT';
+          out[k] = m.rate >= close ? 'close' : 'DIFFERENT';
           const a = base.split('\n'), b = t.split('\n');
           diffs[k] = { rate: m.rate, onlyBase: a.filter((x) => !b.includes(x)), onlyThis: b.filter((x) => !a.includes(x)) };
         }
@@ -294,8 +296,140 @@ window.tests = {
     const plain = await ocr.createWorker('eng', 1, local({ recognizer: 'webgpu' }));
     const plainInfo = plain.info;
     await plain.terminate();
-    const want = mode === 'webgpu' ? 'webgpu' : 'wasm';
+    const want = mode === 'wasm' ? 'wasm' : 'webgpu';
     return { ok: same && info.recognizers['320'] === want && info.recognizers['640'] === want && plainInfo.recognizers['320'] === 'wasm', info, plainInfo, out };
+  },
+
+  // recognizer 'auto' (the default). The runner names what this browser and page must choose (`expect`):
+  //   'webgpu'      WebAssembly has 1 thread, a WebGPU device exists and the WebGPU form of the 320 file is given
+  //                 (rec320Url): the check line reads the same, every fixture and a long line (640 / 960) read the same
+  //                 text as recognizer 'wasm'
+  //   'threads'     WebAssembly has several threads: WebAssembly, no check
+  //   'nogpu'       1 thread, no WebGPU device: WebAssembly, no check
+  //   'unpublished' 1 thread, WebGPU, no WebGPU form of the 320 file: WebAssembly, no check
+  async recognizerAuto({ rec320Url, rec320Sha, expect }) {
+    const notices = [];
+    const opts = rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {};
+    const auto = await ocr.createWorker('eng', 1, local({ ...opts, logger: (m) => m.status === 'notice' && notices.push(m.message) }));
+    const info = auto.info;
+    const said = notices.filter((n) => n.startsWith('Recognizer on'));
+    const reasonOk = { webgpu: /read the check line exactly as WebAssembly/, threads: /runs on \d+ threads here/, nogpu: /no WebGPU device/, unpublished: /not published yet/ }[expect];
+    let ok = said.length === 1 && reasonOk.test(info.recognizerReason) && said[0].includes(info.recognizerReason);
+    const out = { expect, info, notice: said[0] ?? null };
+    if (expect === 'webgpu') {
+      ok &&= info.recognizer === 'webgpu' && info.recognizerCheck?.differing === 0 && /Total|8,415|合計/.test(info.recognizerCheck.text);
+      const wasm = await ocr.createWorker('eng', 1, local({ recognizer: 'wasm' }));
+      const long = canvasWithText(2100, 80, ['The quick brown fox jumps over the lazy dog while 12 bakers count 3,456 loaves of bread'], '44px Arial');
+      const images = { ...Object.fromEntries(Object.keys(await fixtures()).map((f) => [f, FIX + f])), 'long line (640 and 960)': long };
+      out.same = {};
+      for (const [k, img] of Object.entries(images)) {
+        const a = (await wasm.recognize(img)).data.text;
+        const b = (await auto.recognize(img)).data.text;
+        out.same[k] = a === b ? true : { wasm: a.split('\n').filter((x) => !b.includes(x)), webgpu: b.split('\n').filter((x) => !a.includes(x)) };
+      }
+      await wasm.terminate();
+      out.laterNotices = notices.filter((n) => /recognizer read the check line differently|could not run the \d+-wide recognizer/.test(n));
+      ok &&= Object.values(out.same).every((v) => v === true) && out.laterNotices.length === 0;
+    } else {
+      ok &&= info.recognizer === 'wasm' && info.recognizerCheck === null;
+      ok &&= /Electricity Bill/.test((await auto.recognize(FIX + 'mobile.png')).data.text);
+    }
+    await auto.terminate();
+    return { ok, ...out };
+  },
+  // the check made to see a differing output (a test hook): the recognizer stays on WebAssembly and says why
+  async recognizerAutoMismatch({ rec320Url, rec320Sha }) {
+    const w = await ocr.createWorker('eng', 1, local({ modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } }, _recognizerCheck: 'mismatch' }));
+    const info = w.info;
+    const text = (await w.recognize(FIX + 'mobile.png')).data.text;
+    await w.terminate();
+    const ok = info.recognizer === 'wasm' && info.recognizerCheck?.differing >= 1 && /read the check line differently/.test(info.recognizerReason) && /Electricity Bill/.test(text);
+    return { ok, info };
+  },
+
+  // ---- a PNG or JPEG cut short: a notice in every browser; the browser decides whether it reads the part that arrived
+  async cutShortNotice() {
+    const notices = [];
+    const w = await ocr.createWorker('eng', 1, local({ logger: (m) => m.status === 'notice' && notices.push(m.message) }));
+    const png = new Uint8Array(await (await fetch(FIX + 'mobile.png')).arrayBuffer());
+    const jpg = new Uint8Array(await (await fetch(FIX + 'dialog-shared.jpg')).arrayBuffer());
+    const cases = {
+      'PNG, first half': [new Blob([png.slice(0, png.length >> 1)], { type: 'image/png' }), true],
+      'JPEG, first half': [new Blob([jpg.slice(0, jpg.length >> 1)], { type: 'image/jpeg' }), true],
+      'PNG, whole': [new Blob([png], { type: 'image/png' }), false],
+      'JPEG with 4 KB after its end marker': [new Blob([jpg, new Uint8Array(4096).fill(7)], { type: 'image/jpeg' }), false],
+    };
+    const out = {};
+    for (const [k, [blob, cut]] of Object.entries(cases)) {
+      const n0 = notices.length;
+      let result;
+      try {
+        const r = await w.recognize(blob);
+        result = { read: true, lines: r.data.text.split('\n').filter(Boolean).length };
+      } catch (e) {
+        result = { read: false, code: e.code, message: e.message };
+      }
+      const said = notices.slice(n0).filter((m) => /cut short/.test(m));
+      const ok = cut
+        ? said.length === 1 && (result.read || (result.code === 'IMAGE_DECODE_FAILED' && /cut short/.test(result.message)))
+        : said.length === 0 && result.read && result.lines > 3;
+      out[k] = { ok, ...result, notice: said[0] ?? null };
+    }
+    const still = /Electricity Bill/.test((await w.recognize(FIX + 'mobile.png')).data.text);
+    await w.terminate();
+    return { ok: Object.values(out).every((x) => x.ok) && still, out, workerStillWorks: still };
+  },
+
+  // ---- model files cached in the background after the first result, then a visit with the network gone ------
+  // (r4: after one image online, 7 of 13 images failed offline because the 960-wide recognizer was never stored)
+  async cacheReset() {
+    const names = await caches.keys();
+    for (const n of names) await caches.delete(n);
+    return { ok: true, deleted: names };
+  },
+  async prefetchFirst({ prefetch }) {
+    const log = [];
+    let settled;
+    const cached = new Promise((r) => { settled = r; });
+    const w = await ocr.createWorker('eng', 1, local({ ...(prefetch ? {} : { prefetch: false }), logger: (m) => { log.push(m); if (m.status === 'caching model' && m.progress === 1) settled(m); } }));
+    const t0 = performance.now();
+    const r = await w.recognize(FIX + 'mobile.png');
+    const firstMs = Math.round(performance.now() - t0);
+    let final = null;
+    if (prefetch) final = await Promise.race([cached, new Promise((ok) => setTimeout(() => ok(null), 90000))]);
+    const cachingMs = Math.round(performance.now() - t0);
+    await w.terminate();
+    const caching = log.filter((m) => m.status === 'caching model');
+    const files = [...new Set(caching.map((m) => m.file).filter(Boolean))];
+    const ok = /Electricity Bill/.test(r.data.text) && (prefetch ? !!final && /^All \d+ model and runtime files are in the cache/.test(final.message) && files.includes('ppocrv6_small_rec_960_fp32.tflite') : caching.length === 0);
+    return { ok, prefetch, firstMs, cachingMs, final: final?.message ?? null, cachedInBackground: files };
+  },
+  async offlinePrepare() {
+    const exp = await fixtures();
+    window.__blobs = {};
+    for (const f of Object.keys(exp)) window.__blobs[f] = await (await fetch(FIX + f)).blob();
+    return { ok: true, files: Object.keys(window.__blobs) };
+  },
+  async prefetchSecond({ expectAll }) {
+    // the runner took the network away; the images were fetched before (offlinePrepare)
+    const images = { ...window.__blobs, 'long line (640 and 960)': canvasWithText(2100, 80, ['The quick brown fox jumps over the lazy dog while 12 bakers count 3,456 loaves of bread'], '44px Arial') };
+    const w = await ocr.createWorker('eng', 1, local());
+    const out = {};
+    for (const [k, img] of Object.entries(images)) {
+      try {
+        const r = await w.recognize(img);
+        out[k] = { read: true, lines: r.data.text.split('\n').filter(Boolean).length };
+      } catch (e) {
+        out[k] = { read: false, code: e.code, message: e.message };
+      }
+    }
+    await w.terminate();
+    const read = Object.values(out).filter((x) => x.read).length;
+    const long = out['long line (640 and 960)'];
+    const ok = expectAll
+      ? read === Object.keys(images).length
+      : !long.read && long.code === 'MODEL_FETCH_FAILED' && /eager: true/.test(long.message) && /not in the cache/.test(long.message);
+    return { ok, read, of: Object.keys(images).length, out, onLine: navigator.onLine };
   },
 
   // ---- failure paths ----------------------------------------------------------------------------------
@@ -319,6 +453,7 @@ window.tests = {
   async failDecode() {
     const w = await worker();
     const png = new Uint8Array(await (await fetch(FIX + 'mobile.png')).arrayBuffer());
+    // the first 200 bytes of a PNG: no image data at all
     const a = await expectError(() => w.recognize(new Blob([png.slice(0, 200)], { type: 'image/png' })), 'IMAGE_DECODE_FAILED', ['could not decode']);
     const b = await expectError(() => w.recognize(new Blob(['hello, not an image'], { type: 'text/plain' })), 'IMAGE_DECODE_FAILED', ['PNG, JPEG']);
     const still = (await w.recognize(FIX + 'mobile.png')).data.text.length > 20;
@@ -381,8 +516,16 @@ window.tests = {
     const n = log.filter((m) => m.status === 'notice').map((m) => m.message);
     return { ok: w.info.threads === 1 && n.some((x) => x.includes('Cross-Origin-Opener-Policy') && x.includes('coi-serviceworker')) && /Electricity Bill/.test(r.data.text), info: w.info, notices: n };
   },
-  async cspBlob() {
-    const a = await expectError(() => ocr.createWorker('eng', 1, local()), 'WORKER_START_FAILED', ['worker-src', 'workerPath']);
+  // allowUnblocked (WebKit): a browser that does not apply worker-src 'self' to blob: workers starts the worker
+  async cspBlob({ allowUnblocked = false } = {}) {
+    let a;
+    try {
+      const w0 = await ocr.createWorker('eng', 1, local());
+      await w0.terminate();
+      a = { ok: allowUnblocked, message: 'the blob: worker started (this browser does not apply worker-src to it)' };
+    } catch (e) {
+      a = { ok: e?.code === 'WORKER_START_FAILED' && ['worker-src', 'workerPath'].every((s) => String(e?.message).includes(s)), code: e?.code, message: e?.message };
+    }
     const w = await ocr.createWorker('eng', 1, local({ workerPath: '../../dist/worker.js' }));
     const r = await w.recognize(FIX + 'mobile.png');
     await w.terminate();

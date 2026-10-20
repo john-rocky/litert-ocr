@@ -1,7 +1,7 @@
 // Build the examples against a packed tarball of this repository and read one image (one PDF and one scan in the
-// pdf-to-markdown example) in each with headless Chrome (file picker driven by Playwright). Logs go to $LOG_DIR
-// (default test/out/).
-//   node test/examples.mjs [html|pdf|react-vite|nextjs ...]
+// pdf-to-markdown example) in each with headless Chrome (file picker driven by Playwright); start the MCP example's
+// configuration and convert one PDF through it. Logs go to $LOG_DIR (default test/out/).
+//   node test/examples.mjs [html|pdf|react-vite|nextjs|mcp ...]
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +12,7 @@ import { startServer } from './server.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const LOG = process.env.LOG_DIR ?? join(ROOT, 'test/out');
 mkdirSync(LOG, { recursive: true });
-const which = process.argv.slice(2).length ? process.argv.slice(2) : ['html', 'pdf', 'react-vite', 'nextjs'];
+const which = process.argv.slice(2).length ? process.argv.slice(2) : ['html', 'pdf', 'react-vite', 'nextjs', 'mcp'];
 const FIXTURE = join(ROOT, 'test/fixtures/dialog-shared.jpg');
 const results = [];
 
@@ -82,7 +82,35 @@ async function readPdfExample(url) {
   }
 }
 
-if (which.includes('pdf')) {
+// examples/mcp: the checkout configuration (mcp-local-checkout.json) started as written, with this repository's path,
+// and driven by the MCP SDK client the way an agent would: list the tools, convert a PDF to Markdown
+async function mcpExample() {
+  const t0 = Date.now();
+  const cfg = JSON.parse(readFileSync(join(ROOT, 'examples/mcp/mcp-local-checkout.json'), 'utf8'));
+  const [name, server] = Object.entries(cfg.mcpServers)[0];
+  // the configuration's placeholders: this checkout, and no layout model files (pages are laid out by geometry)
+  const args = server.args.map((a) => a.replace(/^\/path\/to\/[^/]+/, ROOT.replace(/\/$/, '')));
+  const i = args.indexOf('--layout-model-base');
+  if (i >= 0) args.splice(i, 2);
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const transport = new StdioClientTransport({ command: server.command === 'node' ? process.execPath : server.command, args, stderr: 'pipe' });
+  const client = new Client({ name: 'examples-mcp', version: '0.0.0' });
+  await client.connect(transport);
+  try {
+    const { tools } = await client.listTools();
+    const md = await client.callTool({ name: 'convert_to_markdown', arguments: { uri: join(ROOT, 'test/out/fixtures/report.pdf') } });
+    const text = md.content?.[0]?.text ?? '';
+    const ok = !md.isError && /^# Harbor Library Monthly Report$/m.test(text) && tools.length === 4;
+    const r = { example: `mcp (${name}: ${server.command} ${args.join(' ')})`, ok, tools: tools.map((t) => t.name), seconds: Math.round((Date.now() - t0) / 1000), md: text.split('\n').slice(0, 6) };
+    results.push(r);
+    console.log(`${ok ? 'PASS' : 'FAIL'} example mcp: ${tools.length} tools, ${text.split('\n')[0]}`);
+  } finally {
+    await client.close();
+  }
+}
+
+if (which.includes('pdf') || which.includes('mcp')) {
   execFileSync(process.execPath, ['test/fixtures/make-pdfs.mjs'], { cwd: ROOT, stdio: 'inherit' });
 }
 mkdirSync(join(ROOT, 'examples/.pack'), { recursive: true });
@@ -122,6 +150,7 @@ try {
       writeFileSync(join(LOG, 'example-nextjs-start.log'), out);
     }
   }
+  if (which.includes('mcp')) await mcpExample();
 } catch (e) {
   results.push({ ok: false, error: String(e.message ?? e) });
   console.log(`FAIL examples: ${e.message}`);

@@ -12,12 +12,16 @@ export interface InitOptions {
   /** Absolute URL of the LiteRT.js wasm directory (browser). */
   wasmPath: string;
   backend: 'auto' | 'wasm';
-  /** Where the recognizers run (see WorkerOptions.recognizer); absent = 'wasm'. */
-  recognizer?: 'wasm' | 'webgpu';
+  /** Where the recognizers run (see WorkerOptions.recognizer); absent = 'auto'. */
+  recognizer?: 'auto' | 'wasm' | 'webgpu';
+  /** Tests only: 'mismatch' makes the start check of recognizer 'auto' see different outputs. */
+  recognizerCheck?: 'mismatch';
   cacheMethod: CacheMethod;
   cachePath?: string;
   /** Load the 640 and 960 recognizers at start instead of on first use. */
   eager: boolean;
+  /** After the first result, download the model files not loaded yet into the cache (WorkerOptions.prefetch). */
+  prefetch: boolean;
   /** Directory URL / path of the layout model files (convert); null = none (not published yet and not given). */
   layoutBase?: string | null;
   /** Where the layout model runs (WorkerOptions.layoutBackend); absent = 'auto'. */

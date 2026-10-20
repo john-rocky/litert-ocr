@@ -2,6 +2,7 @@
 // with importScripts(), which module workers do not allow.
 
 import * as litert from '@litertjs/core';
+import { CUT_HINT, cutShortBlob } from '../core/cutshort.js';
 import { OcrError, errText } from '../core/errors.js';
 import { createHandler, type Platform, type Prepared } from '../core/handler.js';
 import { LITERT_FILES, LITERT_WASM_BASE, litertPrint, type RuntimeVariant } from '../core/models.js';
@@ -97,6 +98,10 @@ const platform: Platform<ImageBitmap> = {
         async put(key, bytes) {
           await c.put(key, new Response(bytes as BlobPart, { headers: { 'content-length': String(bytes.byteLength) } }));
         },
+        async has(key, bytes) {
+          const r = await c.match(key);
+          return !!r && (!bytes || Number(r.headers.get('content-length')) === bytes);
+        },
       };
     } catch {
       return null;
@@ -111,7 +116,9 @@ const platform: Platform<ImageBitmap> = {
     return sha256Hex(bytes);
   },
 
-  async decode(image: WireImage) {
+  saveData: () => (navigator as { connection?: { saveData?: boolean } }).connection?.saveData === true,
+
+  async decode(image: WireImage, onCut) {
     let blob: Blob;
     switch (image.kind) {
       case 'bitmap':
@@ -149,13 +156,16 @@ const platform: Platform<ImageBitmap> = {
       case 'path':
         throw new OcrError('IMAGE_UNSUPPORTED_TYPE', 'A file path works in Node.js only. In the browser pass a URL, File, Blob, <img>, <canvas>, ImageBitmap or ImageData.');
     }
+    // a PNG / JPEG cut short: browsers differ (one rejects it, another draws the part that arrived), so say it either way
+    const cut = await cutShortBlob(blob).catch(() => null);
+    if (cut) onCut?.(`${cut} ${CUT_HINT}`);
     let bm: ImageBitmap;
     try {
       bm = await createImageBitmap(blob, { imageOrientation: 'from-image' });
     } catch (e) {
       throw new OcrError(
         'IMAGE_DECODE_FAILED',
-        `The browser could not decode the image (${blob.type || 'unknown type'}, ${blob.size} bytes): ${errText(e)}. Pass a PNG, JPEG, WebP, GIF, BMP or AVIF file; PDF and HEIC are not images this library can open.`,
+        `The browser could not decode the image (${blob.type || 'unknown type'}, ${blob.size} bytes${cut ? ', cut short' : ''}): ${errText(e)}. ${cut ? 'Pass the complete file.' : 'Pass a PNG, JPEG, WebP, GIF, BMP or AVIF file; PDF and HEIC are not images this library can open.'}`,
       );
     }
     return { src: bm, release: () => bm.close() };

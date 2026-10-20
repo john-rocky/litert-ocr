@@ -6,6 +6,9 @@
 //   /models/<file>      the five model files from .models/ (fetched by test/fetch-models.mjs)
 //   /models-bad/<file>  the same files, the detector with one byte flipped (sha256 mismatch test)
 //   /wasm/<file>        node_modules/@litertjs/core/wasm/
+//   /__offline?on=1|0   (from this machine) while on, /models/ and /wasm/ requests get a dropped connection: the network
+//                       gone for the model and runtime files only, in any browser (WebKit's offline mode also stops
+//                       blob: workers from loading)
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
@@ -22,11 +25,21 @@ function mapPath(p) {
 }
 
 export function startServer(port = 0, { extraRoots = {} } = {}) {
+  let offline = false;
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let p = decodeURIComponent(url.pathname);
+    if (p === '/__offline') {
+      offline = url.searchParams.get('on') === '1';
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ offline }));
+      return;
+    }
     const mode = p.split('/')[1];
     const headers = { 'Cache-Control': 'no-store' };
+    if (offline && /^\/(coi|plain|csp)\/(models|models-bad|wasm)\//.test(p)) {
+      req.socket.destroy();
+      return;
+    }
     if (mode === 'coi' || mode === 'csp') {
       headers['Cross-Origin-Opener-Policy'] = 'same-origin';
       headers['Cross-Origin-Embedder-Policy'] = 'require-corp';

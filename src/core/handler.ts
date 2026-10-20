@@ -5,10 +5,10 @@ import type * as LiteRtModule from '@litertjs/core';
 import type { Region, RuledBox, Unit } from '../doc/geom.js';
 import { LAYOUT_SIZE, LayoutModel } from '../doc/layout.js';
 import { RULE_WIDTH, SKEW_WIDTH, estimateSkew, ruledBoxes } from '../doc/scan.js';
-import { Engine } from './engine.js';
+import { Engine, webGpuUsable } from './engine.js';
 import { OcrError, errText, serializeError } from './errors.js';
 import { fetchVerified, type FetchContext, type FileCache, type FileSpec } from './fetcher.js';
-import { LAYOUT_BASE, LAYOUT_FILES, LAYOUT_NAME, LITERT_VERSION, MODEL_BASE, MODEL_FILES, MODEL_NAME, MODEL_REVISION, PKG_NAME, PKG_VERSION, type LayoutForm, type ModelRole } from './models.js';
+import { LAYOUT_BASE, LAYOUT_FILES, LAYOUT_NAME, LITERT_VERSION, MODEL_BASE, MODEL_FILES, MODEL_NAME, MODEL_REVISION, PKG_NAME, PKG_VERSION, REC320_WEBGPU_BASE, REC320_WEBGPU_FILE, type LayoutForm, type ModelRole } from './models.js';
 import { buildPage, type CoordMap } from './output.js';
 import type { RasterOps } from './pipeline.js';
 import type { DocPageOptions, InitOptions, ProgressData, Request, Response, WireImage } from './protocol.js';
@@ -33,7 +33,10 @@ export interface Platform<Src> {
   cache(o: InitOptions): Promise<FileCache | null>;
   sha256(bytes: Uint8Array): Promise<string>;
   readLocal?: (url: string) => Promise<Uint8Array> | null;
-  decode(image: WireImage): Promise<{ src: Src; release(): void }>;
+  /** Decode an image; `onCut` hears, before decoding, that a PNG / JPEG file is cut short (src/core/cutshort.ts). */
+  decode(image: WireImage, onCut?: (message: string) => void): Promise<{ src: Src; release(): void }>;
+  /** The user asked to save data (the browser's Save-Data): no background downloads. */
+  saveData?: () => boolean;
   prepare(src: Src, rect: Rectangle | null, maxSide: number): Promise<Prepared<Src>>;
   ops: RasterOps<Src, unknown, unknown>;
   /** Page steps of convert(): an RGBA copy scaled to w x h (default smoothing), and the page turned back by deg. */
@@ -75,13 +78,16 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
 
   const send = (id: string, data: ProgressData) => post({ type: 'progress', id, data });
 
+  // what the background download after the first result needs (set by init)
+  let afterFirst: ((id: string) => void) | null = null;
+
   async function init(id: string, o: InitOptions): Promise<WorkerInfo> {
     const notice = (message: string, level: 'info' | 'warn' = 'info') => send(id, { status: 'notice', progress: 1, message, level });
     const cache = await platform.cache(o);
     fileCache = cache;
     initOpts = o;
     if (!cache && o.cacheMethod !== 'none') notice('No cache is available here (Cache API needs a secure context); the files download on every start.', 'warn');
-    const makeCtx = (selfHost: 'modelBase' | 'wasmPath', onBytes: FetchContext['onBytes']): FetchContext => ({
+    const makeCtx = (selfHost: 'modelBase' | 'wasmPath', onBytes: FetchContext['onBytes'], needed?: string): FetchContext => ({
       cache,
       cacheMethod: o.cacheMethod,
       sha256: platform.sha256,
@@ -89,24 +95,37 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       readLocal: platform.readLocal ?? (() => null),
       selfHostOption: selfHost,
       onBytes,
+      ...(needed ? { needed } : {}),
     });
+    // every file a start reads (runtime and models), to tell later whether all of them are in the cache
+    const startSpecs: FileSpec[] = [];
     const io: RuntimeIO = {
       notice,
       progress: (d) => send(id, d),
-      fetch: (spec, status) =>
-        fetchVerified(spec, makeCtx('wasmPath', (loaded, total, fromCache) => send(id, { status, progress: total ? loaded / total : 0, file: spec.name, loaded, total, fromCache }))),
+      fetch: (spec, status) => {
+        startSpecs.push(spec);
+        return fetchVerified(spec, makeCtx('wasmPath', (loaded, total, fromCache) => send(id, { status, progress: total ? loaded / total : 0, file: spec.name, loaded, total, fromCache })));
+      },
     };
     const { litert, threads } = await platform.loadRuntime(o, io);
     runtime = { litert, threads };
+    const want = o.recognizer ?? 'auto';
+    // the 320-wide file: the published one, or its WebGPU form where the recognizer may run on WebGPU (once published)
+    const gpuRec320 = REC320_WEBGPU_BASE !== null && !o.modelFiles.rec320 && (want === 'webgpu' || (want === 'auto' && threads === 1 && webGpuUsable(litert)));
     const specOf = (role: ModelRole): FileSpec => {
       const over = o.modelFiles[role];
       const pinned = MODEL_FILES[role];
       if (over) return over.sha256 ? { name: pinned.file, url: over.url, sha256: over.sha256, origin: MODEL_BASE } : { name: pinned.file, url: over.url, origin: MODEL_BASE };
+      if (role === 'rec320' && gpuRec320) {
+        const f = REC320_WEBGPU_FILE;
+        return { name: f.file, url: o.modelBase === MODEL_BASE ? joinUrl(REC320_WEBGPU_BASE!, f.file) : joinUrl(o.modelBase, f.file), bytes: f.bytes, sha256: f.sha256, origin: REC320_WEBGPU_BASE! };
+      }
       return { name: pinned.file, url: joinUrl(o.modelBase, pinned.file), bytes: pinned.bytes, sha256: pinned.sha256, origin: MODEL_BASE };
     };
     // Model files: one progress stream over the files loaded at start.
     const startRoles: ModelRole[] = o.eager ? ['characters', 'det', 'rec320', 'rec640', 'rec960'] : ['characters', 'det', 'rec320'];
     const specs = startRoles.map(specOf);
+    startSpecs.push(...specs);
     const total = specs.reduce((s, f) => s + (f.bytes ?? 0), 0);
     const got: Partial<Record<ModelRole, Uint8Array>> = {};
     // in parallel; one progress stream over the bytes of all of them
@@ -124,6 +143,14 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       ),
     );
     startRoles.forEach((role, i) => { got[role] = bytes[i]!; });
+    const cached = async (s: FileSpec): Promise<boolean> => {
+      if (!cache?.has) return false;
+      try { return await cache.has(s.url, s.bytes); } catch { return false; }
+    };
+    // the background download of the recognizers not loaded yet (prefetch): a line that needs one meanwhile waits for it
+    const caching: Partial<Record<ModelRole, Promise<void>>> = {};
+    const neededText = (width: 640 | 960) =>
+      `A line wider than ${width === 640 ? 320 : 640} px at height 48 needs this file and it is not in the cache: it loads the first time such a line appears${o.prefetch ? ' (or in the background after the first result)' : ''}, so this device has not stored it yet.`;
     const lazy = async (width: 640 | 960): Promise<Uint8Array> => {
       const role = `rec${width}` as ModelRole;
       if (got[role]) {
@@ -131,9 +158,10 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
         delete got[role];
         return b;
       }
-      notice(`A line wider than ${width === 640 ? 320 : 640} px at height 48 needs ${MODEL_FILES[role].file}; loading it now (once).`);
+      if (caching[role]) await caching[role];
       const spec = specOf(role);
-      return fetchVerified(spec, makeCtx('modelBase', (loaded, t, fromCache) => send(currentJob, { status: 'loading model', progress: t ? loaded / t : 0, file: spec.name, loaded, total: t, fromCache })));
+      if (!(await cached(spec))) notice(`A line wider than ${width === 640 ? 320 : 640} px at height 48 needs ${MODEL_FILES[role].file}; loading it now (once).`);
+      return fetchVerified(spec, makeCtx('modelBase', (loaded, t, fromCache) => send(currentJob, { status: 'loading model', progress: t ? loaded / t : 0, file: spec.name, loaded, total: t, fromCache }), neededText(width)));
     };
     engine = await Engine.create({
       litert,
@@ -143,8 +171,9 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       loadRec: lazy,
       numThreads: threads,
       backend: o.backend,
-      recognizer: o.recognizer ?? 'wasm',
-      rec320Safe: o.modelFiles.rec320 !== undefined,
+      recognizer: want,
+      rec320Safe: o.modelFiles.rec320 !== undefined || gpuRec320,
+      ...(o.recognizerCheck ? { checkHook: o.recognizerCheck } : {}),
       notice,
       progress: (p, step) => send(id, { status: 'initializing model', progress: p, message: step }),
     });
@@ -155,20 +184,67 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       await engine.recognizer(960);
     }
     const rb = engine.recBackends;
-    const planned = o.recognizer === 'webgpu' && engine.gpuUsable ? 'webgpu' : 'wasm';
+    const planned = (want === 'webgpu' && engine.gpuUsable) || (want === 'auto' && engine.autoGpu) ? 'webgpu' : 'wasm';
     const recognizers = { '320': rb[320], '640': o.eager ? rb[640] : planned, '960': o.eager ? rb[960] : planned } as const;
     const kinds = new Set(Object.values(recognizers));
     info = {
       detector: engine.detector,
       recognizer: kinds.size > 1 ? 'mixed' : [...kinds][0]!,
       recognizers,
+      recognizerReason: engine.recognizerReason,
+      recognizerCheck: engine.recognizerCheck,
       threads,
       runtime: `LiteRT.js ${LITERT_VERSION}`,
       model: `${MODEL_NAME} @${MODEL_REVISION.slice(0, 7)}`,
       platform: platform.name,
     };
+    notice(`Recognizer on ${info.recognizer === 'webgpu' ? 'WebGPU' : info.recognizer === 'mixed' ? 'WebGPU and WebAssembly' : 'WebAssembly'}: ${engine.recognizerReason}`);
     const recText = info.recognizer === 'mixed' ? `recognizer 320 ${recognizers['320']} / 640, 960 ${recognizers['640']}` : `recognizer ${info.recognizer}`;
     send(id, { status: 'initialized', progress: 1, message: `detector ${info.detector}, ${recText}, ${threads} thread${threads === 1 ? '' : 's'}` });
+
+    // After the first result: the recognizers not loaded yet go into the cache in the background, so that a later
+    // visit reads any image offline. Never before a result (the first answer is not delayed), never twice.
+    afterFirst = (jobId) => {
+      afterFirst = null;
+      if (!o.prefetch || o.eager || !cache || o.cacheMethod !== 'write' || !engine) return;
+      if (platform.saveData?.()) {
+        send(jobId, { status: 'notice', progress: 1, level: 'info', message: 'The browser asks to save data (Save-Data), so the 640 / 960 recognizers are not downloaded in the background; they load when a line needs them. For offline use, pass { eager: true } once online.' });
+        return;
+      }
+      const lazyFiles = ([640, 960] as const).map((w) => ({ width: w, role: `rec${w}` as ModelRole, spec: specOf(`rec${w}` as ModelRole) }));
+      const later = lazyFiles.filter((t) => !engine!.hasRecognizer(t.width));
+      // set before any await: a line that needs one of these files from now on waits for its download
+      const settle: Partial<Record<ModelRole, () => void>> = {};
+      for (const t of later) caching[t.role] = new Promise<void>((r) => { settle[t.role] = r; });
+      void (async () => {
+        const failed: string[] = [];
+        const todo: typeof later = [];
+        for (const t of later) if (await cached(t.spec)) settle[t.role]!(); else todo.push(t);
+        const total = todo.reduce((s, t) => s + (t.spec.bytes ?? 0), 0);
+        const loadedBy = todo.map(() => 0);
+        await Promise.all(todo.map((t, i) =>
+          fetchVerified(t.spec, {
+            ...makeCtx('modelBase', (loaded) => {
+              loadedBy[i] = loaded;
+              const sum = loadedBy.reduce((a, b) => a + b, 0);
+              send(jobId, { status: 'caching model', progress: total ? Math.min(0.99, sum / total) : 0, file: t.spec.name, loaded: sum, total, fromCache: false });
+            }),
+            notice: () => {},
+          }).then(() => undefined, (e) => { failed.push(`${t.spec.name} (${errText(e)})`); }).finally(() => settle[t.role]!()),
+        ));
+        // every file a later start needs, in the cache?
+        const seen = new Set<string>();
+        const all = [...startSpecs, ...lazyFiles.map((t) => t.spec)].filter((s) => /^https?:/i.test(s.url) && !seen.has(s.url) && seen.add(s.url));
+        let missing = 0;
+        for (const s of all) if (!(await cached(s))) missing++;
+        const message = failed.length
+          ? `Could not download into the cache: ${failed.join('; ')}. These files load when a line needs them.`
+          : missing
+            ? `${missing} of ${all.length} model and runtime files are not in the cache (the browser did not keep them), so a later visit needs the network.`
+            : `All ${all.length} model and runtime files are in the cache: a later visit reads offline.`;
+        send(jobId, { status: 'caching model', progress: 1, loaded: total, total, message });
+      })();
+    };
     return info;
   }
 
@@ -180,7 +256,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     currentJob = id;
     const t0 = performance.now();
     send(id, { status: 'recognizing text', progress: 0 });
-    const decoded = await platform.decode(req.image);
+    const decoded = await platform.decode(req.image, (message) => send(id, { status: 'notice', progress: 1, level: 'warn', message }));
     let prepared: Prepared<Src> | null = null;
     try {
       prepared = await platform.prepare(decoded.src, req.rectangle, MAX_SIDE);
@@ -275,7 +351,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     currentJob = id;
     const t0 = performance.now();
     send(id, { status: 'recognizing text', progress: 0 });
-    const decoded = await platform.decode(req.image);
+    const decoded = await platform.decode(req.image, (message) => send(id, { status: 'notice', progress: 1, level: 'warn', message }));
     let prepared: Prepared<Src> | null = null;
     let turned: { src: Src; release(): void } | null = null;
     try {
@@ -371,10 +447,12 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       }
       if (req.type === 'recognize') {
         post({ type: 'resolve', id: req.id, data: await recognize(req) });
+        afterFirst?.(req.id);
         return;
       }
       if (req.type === 'docPage') {
         post({ type: 'resolve', id: req.id, data: await docPage(req) });
+        afterFirst?.(req.id);
         return;
       }
     } catch (e) {

@@ -31,6 +31,18 @@ export const MODEL_FILES: Record<ModelRole, PinnedFile> = {
 export const MODEL_ROLES: ModelRole[] = ['det', 'rec320', 'rec640', 'rec960', 'characters'];
 export const VOCAB_SIZE = 18710;
 
+/**
+ * The 320-wide recognizer rewritten for WebGPU: its attention product (q·kᵀ, 40 columns) is computed as two halves
+ * of 20 columns, which avoids the misreads of LiteRT issue #9661 on WebGPU; on WebAssembly it computes the same
+ * numbers as the published file (each output is the same dot product). recognizer 'auto' moves recognition to
+ * WebGPU with it where WebAssembly runs on 1 thread (Safari). Not on Hugging Face yet (upload pending): while
+ * REC320_WEBGPU_SOURCE is null, 'auto' keeps the recognizer on WebAssembly unless `modelFiles.rec320` gives this file.
+ * Publishing = filling this one line with the Hub repository and its commit; the file keeps its name, size and sha256.
+ */
+export const REC320_WEBGPU_SOURCE: { repo: string; revision: string } | null = null; // upload pending
+export const REC320_WEBGPU_FILE: PinnedFile = { file: 'ppocrv6_small_rec_320_fp32_webgpu.tflite', bytes: 21517364, sha256: '3b4e228232967986fc715c5501f0731b70c6d17fd64d023dc35dee4f81d10b90' };
+export const REC320_WEBGPU_BASE: string | null = REC320_WEBGPU_SOURCE ? `https://huggingface.co/${(REC320_WEBGPU_SOURCE as { repo: string }).repo}/resolve/${(REC320_WEBGPU_SOURCE as { revision: string }).revision}/` : null;
+
 /** LiteRT.js runtime (npm @litertjs/core). The browser build fetches these from jsDelivr by default. */
 export const LITERT_VERSION = '2.5.3';
 export const LITERT_WASM_BASE = `https://cdn.jsdelivr.net/npm/@litertjs/core@${LITERT_VERSION}/wasm/`;
@@ -102,7 +114,9 @@ export const modelInfo = {
   revision: MODEL_REVISION,
   base: MODEL_BASE,
   files: MODEL_ROLES.map((role) => ({ role, ...MODEL_FILES[role] })),
-  runtime: { package: '@litertjs/core', version: LITERT_VERSION, base: LITERT_WASM_BASE, files: Object.values(LITERT_FILES).flatMap((v) => [v.js, v.wasm]) },
+  /** The WebGPU form of the 320-wide recognizer (recognizer 'auto' where WebAssembly has 1 thread). */
+  rec320WebGpu: { status: REC320_WEBGPU_BASE ? ('published' as const) : ('upload pending' as const), base: REC320_WEBGPU_BASE, ...REC320_WEBGPU_FILE },
+  runtime:{ package: '@litertjs/core', version: LITERT_VERSION, base: LITERT_WASM_BASE, files: Object.values(LITERT_FILES).flatMap((v) => [v.js, v.wasm]) },
   layout: {
     model: LAYOUT_NAME,
     status: LAYOUT_BASE ? ('published' as const) : ('upload pending' as const),
