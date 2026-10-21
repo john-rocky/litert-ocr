@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>litert-ocr: photo, scan or PDF to text, Markdown and JSON</title>
+  <meta name="description" content="Drop a photo, screenshot, scan or PDF: the text with its line boxes, Markdown with tables, and JSON, read in this browser tab. Nothing is uploaded.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // coi-serviceworker sets the two headers that WebAssembly threads need (GitHub Pages cannot): it registers a
+    // service worker and reloads the page once. The page waits for that before it loads the model.
+    window.coi = { quiet: true };
+  </script>
+  <script src="coi-serviceworker.js"></script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>Photo, scan or PDF <span class="arrow">→</span> text, Markdown and JSON</h1>
+    <p class="lede">Read in this tab with <a href="https://github.com/john-rocky/litert-ocr">litert-ocr</a>. Your files never leave this device.</p>
+    <p id="status" class="status" role="status" aria-live="polite"><span class="dot"></span><span id="status-text">Starting…</span></p>
+    <p id="detail" class="detail"></p>
+    <ul id="notes" class="notes"></ul>
+  </header>
+
+  <main>
+    <section class="input" aria-label="Input">
+      <div id="drop" class="drop">
+        <label class="pick">
+          <input id="file" type="file" accept="image/*,application/pdf" disabled>
+          <span id="pick-label">Choose a photo or PDF</span>
+        </label>
+        <p class="hint">or drop a file here, or paste a screenshot</p>
+      </div>
+      <div class="examples">
+        <span class="examples-label">Examples:</span>
+        <button type="button" class="example" data-file="receipt.jpg" disabled>Receipt photo</button>
+        <button type="button" class="example" data-file="inventory-scan.pdf" disabled>Scanned table (PDF)</button>
+        <button type="button" class="example" data-file="sign-ja.jpg" disabled>Sign in Japanese</button>
+        <button type="button" class="example" data-file="screenshot.png" disabled>Screenshot</button>
+      </div>
+      <figure id="figure" class="figure" hidden>
+        <div class="stage">
+          <img id="image" alt="The file being read">
+          <svg id="boxes" class="boxes" aria-hidden="true"></svg>
+        </div>
+        <figcaption id="caption"></figcaption>
+      </figure>
+    </section>
+
+    <section id="result" class="result" aria-label="Result" hidden>
+      <div class="headline">
+        <p id="took" class="took"></p>
+        <p id="took-detail" class="took-detail"></p>
+      </div>
+      <div id="error" class="error" role="alert" hidden>
+        <p id="error-title" class="error-title"></p>
+        <p id="error-text" class="error-text"></p>
+        <form id="password-form" class="password" hidden>
+          <label>Password <input id="password" type="password" autocomplete="off"></label>
+          <button type="submit">Open</button>
+        </form>
+      </div>
+      <div id="output" class="output" hidden>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" class="tab" data-tab="text" aria-selected="true">Text</button>
+          <button type="button" role="tab" class="tab" data-tab="md" aria-selected="false">Markdown</button>
+          <button type="button" role="tab" class="tab" data-tab="json" aria-selected="false">JSON</button>
+          <span class="tab-tools">
+            <label id="source-toggle" class="toggle" hidden><input id="source" type="checkbox"> Source</label>
+            <button type="button" id="copy" class="tool">Copy</button>
+            <button type="button" id="download" class="tool">Download</button>
+          </span>
+        </div>
+        <p id="tab-note" class="tab-note" hidden></p>
+        <div id="pane-text" class="pane" role="tabpanel"></div>
+        <div id="pane-md" class="pane md" role="tabpanel" hidden></div>
+        <pre id="pane-md-source" class="pane source" role="tabpanel" hidden></pre>
+        <pre id="pane-json" class="pane source" role="tabpanel" hidden></pre>
+      </div>
+    </section>
+
+    <section id="about" class="about" aria-label="About this page">
+      <h2>What this page does</h2>
+      <p>Photos and screenshots are read with <code>worker.recognize(file)</code>: every text line, its box, in reading order. PDFs, scans and the Markdown and JSON tabs use <code>convert(file)</code>: pages with a text layer are read from it, scanned pages by OCR, and the lines become headings, paragraphs, lists and tables.</p>
+      <p>Your files are read in this tab. The page downloads only the litert-ocr library and pdf.js from jsDelivr and the model files from Hugging Face, once; the browser keeps them for later visits. <span id="first-visit"></span></p>
+      <p>The time shown is from handing the file to the library to the result, with the model already loaded. PDFs are read up to 20 pages per file here.</p>
+      <p><a href="https://github.com/john-rocky/litert-ocr">Source and documentation</a> · <a href="https://github.com/john-rocky/litert-ocr/tree/main/demo">This page's code</a> · <span id="version">litert-ocr 0.1.0</span></p>
+    </section>
+  </main>
+</body>
+</html>

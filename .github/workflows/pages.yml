@@ -1,0 +1,38 @@
+# Publishes the demo page (demo/) on GitHub Pages: the page's files and its examples, not the record tools.
+# Pages must be set to "GitHub Actions" in the repository settings for the deploy step to run.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['demo/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect the page
+        run: |
+          mkdir _site
+          cp demo/index.html demo/app.js demo/md.js demo/style.css demo/coi-serviceworker.js _site/
+          cp -R demo/examples _site/examples
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

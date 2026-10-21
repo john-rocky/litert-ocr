@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>litert-ocr called directly</title>
+  <link rel="icon" href="data:,">
+  <script>window.coi = { quiet: true };</script>
+  <script src="../coi-serviceworker.js"></script>
+</head>
+<body>
+  <p id="status">Starting…</p>
+  <script type="module">
+    // The library called directly with the options the demo page uses (record/check.mjs compares the page with it):
+    // recognize() for an image's text, convert() for Markdown, JSON and text.
+    const lib = await import('https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm');
+    const worker = await lib.createWorker('eng', 1, { prefetch: false });
+    const converter = lib.createConverter({ eager: true, prefetch: false, layout: 'geometry' });
+    window.direct = async (url, kind, extra = {}) => {
+      const blob = await (await fetch(url)).blob();
+      const file = new File([blob], decodeURIComponent(url.split('/').pop()), { type: blob.type });
+      const out = { url, threads: worker.info.threads, detector: worker.info.detector, recognizer: worker.info.recognizer };
+      if (kind === 'image') out.ocrText = (await worker.recognize(file)).data.text;
+      for (const to of ['md', 'json', 'text']) {
+        try {
+          out[to] = (await converter.convert(file, { to, ...extra })).content;
+        } catch (e) {
+          out[`${to}Error`] = { code: e.code ?? null, message: e.message };
+        }
+      }
+      return out;
+    };
+    document.getElementById('status').textContent = 'Ready';
+  </script>
+</body>
+</html>
