@@ -2,8 +2,8 @@
 // Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy from a service worker, so that WebAssembly threads work on
 // a host that cannot send those headers (GitHub Pages). One addition for this page, marked [litert-ocr demo]: the
 // service worker keeps a copy of the page's own files and of the pinned litert-ocr module, and answers from it when
-// the network is gone, so a later visit opens offline (the library keeps the model files in its own cache).
-// Everything else is the 0.1.7 file as published.
+// the network is gone (the library keeps the model files in its own cache). To share it, the original's
+// header-setting code is moved into a function, withHeaders. Everything else is the 0.1.7 file as published.
 //
 // MIT License
 //

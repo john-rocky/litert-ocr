@@ -32,7 +32,7 @@ async function boot() {
   setStatus('busy', 'Starting…');
   const isolated = await isolation();
   demoState.isolated = isolated;
-  if (!isolated) note('This browser did not turn on cross-origin isolation for this page, so WebAssembly runs on 1 thread: reading is several times slower.');
+  if (!isolated) note('This browser did not let the page turn on WebAssembly threads (cross-origin isolation), so OCR runs on 1 thread: several times slower.');
   setStatus('busy', 'Loading the OCR library…');
   try {
     lib = await import(LIBRARY);
