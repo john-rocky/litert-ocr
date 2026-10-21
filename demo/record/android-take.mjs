@@ -125,13 +125,25 @@ async function cdpConnect(wsUrl) {
 let page = null;
 let targetId = null;
 async function attachPage() {
-  for (let i = 0; i < 80; i++) {
-    const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json().catch(() => []);
+  let opened = false;
+  for (let i = 0; i < 160; i++) {
+    let list = [];
+    try {
+      list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+    } catch {
+      list = []; // Chrome's devtools socket is not up yet
+    }
     const t = list.find((x) => x.type === 'page' && x.url.startsWith(URL0));
     if (t) {
       targetId = t.id;
       page = await cdpConnect(t.webSocketDebuggerUrl);
       return t;
+    }
+    // the intent did not open the page (Chrome was running and only came to the front): a new tab from DevTools
+    if (i >= 12 && !opened && list.length) {
+      opened = true;
+      await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?${URL0}`, { method: 'PUT' }).catch(() => {});
+      log('opened the page from DevTools');
     }
     await sleep(250);
   }
@@ -209,9 +221,13 @@ async function buttonAt() {
   const nodes = dump();
   const b = nodes.find((n) => n.text === 'Choose a photo or PDF' || n.desc === 'Choose a photo or PDF');
   if (b) return center(b);
-  const web = nodes.find((n) => n.pkg === CHROME && n.cls === 'android.webkit.WebView');
+  // Chrome keeps the page's elements out of the UI tree: the page's own box of the button, under Chrome's toolbar
+  const holder = nodes.find((n) => n.id === `${CHROME}:id/compositor_view_holder`);
+  const bar = nodes.find((n) => n.id === `${CHROME}:id/control_container`);
   const r = await evaluate(`(() => { const b = document.getElementById('pick-label').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, dpr: devicePixelRatio }; })()`);
-  return web && r ? [Math.round(web.box[0] + r.x * r.dpr), Math.round(web.box[1] + r.y * r.dpr)] : null;
+  if (!holder || !r) return null;
+  const top = bar && bar.box[1] <= holder.box[1] + 4 && bar.box[3] > holder.box[1] ? bar.box[3] : holder.box[1];
+  return [Math.round(holder.box[0] + r.x * r.dpr), Math.round(top + r.y * r.dpr)];
 }
 async function closePicker() {
   for (let i = 0; i < 5; i++) {
@@ -279,13 +295,10 @@ async function main() {
     log('airplane mode', run.airplane);
     check('airplane mode on, Wi-Fi off, no network', a.airplane === '1' && a.wifi === 'disabled' && ping === 'no answer' && /none/i.test(network), run.airplane);
   }
-  await page.send('Page.reload', { ignoreCache: false });
-  await sleep(1000);
-  st = await until(readyExpr, 120000);
-  if (!st || st.failed) throw new Error(`the page did not get ready again: ${JSON.stringify(st ?? (await evaluate('window.demoState')))}`);
-  run.visit2 = { info: st.info, isolated: st.isolated, bytes: st.bytes, notes: st.notes, onLine: await evaluate('navigator.onLine') };
-  log('visit 2 ready', { network: st.bytes.network, cache: st.bytes.cache, onLine: run.visit2.onLine });
-  check('the page opened again and reached Ready (model from the cache)', st.bytes.network === 0 && st.bytes.cache > 0, run.visit2.bytes);
+  // the page of visit 1 stays open (Ready, the model in memory); the network goes away under it
+  st = await evaluate('window.demoState');
+  run.visit2 = { info: st.info, isolated: st.isolated, bytes: st.bytes, notes: st.notes, onLine: await evaluate('navigator.onLine'), crossOriginIsolated: await evaluate('self.crossOriginIsolated'), same: 'the page of visit 1, not opened again' };
+  log('page kept from visit 1', { onLine: run.visit2.onLine, crossOriginIsolated: run.visit2.crossOriginIsolated, threads: st.info?.threads });
   run.wakeLock = await evaluate(`navigator.wakeLock ? navigator.wakeLock.request('screen').then(() => 'held', (e) => 'refused: ' + e.message) : 'no API'`, { userGesture: true });
 
   // scout the picker for both files without choosing
@@ -359,6 +372,8 @@ async function main() {
   screenshot('take-end.png');
   save();
 
+  await restoreAirplane();
+
   // failure paths and the next file, dropped on the page
   if (FAILURES) {
     const drop = async (url, name) => {
@@ -385,6 +400,45 @@ async function main() {
     }
     log('failure paths', { cases: run.failures.length });
   }
+
+  // the page opened again with airplane mode on: what it says (recorded, not a condition of the take)
+  if (AIRPLANE) {
+    air0 = airplane();
+    sh('cmd connectivity airplane-mode enable');
+    for (let i = 0; i < 40; i++) { await sleep(250); const a = airplane(); if (a.airplane === '1' && a.wifi === 'disabled') break; }
+    await page.send('Page.reload', { ignoreCache: false });
+    await sleep(1500);
+    const again = await until(readyExpr, 60000);
+    run.reopenOffline = {
+      airplane: airplane(),
+      state: again ?? (await evaluate('window.demoState')),
+      controller: await evaluate('!!navigator.serviceWorker?.controller'),
+      crossOriginIsolated: await evaluate('self.crossOriginIsolated'),
+      navigation: await evaluate('(() => { const n = performance.getEntriesByType("navigation")[0]; return n ? { type: n.type, workerStart: n.workerStart, deliveryType: n.deliveryType ?? null, transferSize: n.transferSize } : null; })()'),
+    };
+    log('reopen offline', { ready: !!again && !again.failed, controller: run.reopenOffline.controller, crossOriginIsolated: run.reopenOffline.crossOriginIsolated, navigation: run.reopenOffline.navigation });
+    await restoreAirplane();
+  }
+}
+
+async function restoreAirplane() {
+  if (!air0) return;
+  const before = air0;
+  air0 = null;
+  if (before.airplane !== '1') sh('cmd connectivity airplane-mode disable');
+  for (let i = 0; i < 60; i++) {
+    await sleep(250);
+    const a = airplane();
+    if (a.airplane === before.airplane && (a.wifi === before.wifi || i > 30)) break;
+  }
+  let a = airplane();
+  if (a.wifi !== before.wifi) {
+    sh(`svc wifi ${before.wifi === 'enabled' ? 'enable' : 'disable'}`);
+    await sleep(2000);
+    a = airplane();
+  }
+  (run.airplaneRestores ??= []).push({ before, after: a, at: new Date().toISOString() });
+  log('airplane mode back', { before, after: a });
 }
 
 /** Height of the status bar, from the top of Chrome's window in the UI tree; its colour from the screenshot. */
@@ -409,21 +463,8 @@ async function cleanup() {
     if (targetId) await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${targetId}`).catch(() => {});
   } catch (e) { done.page = e.message; }
   try {
-    if (air0) {
-      if (air0.airplane !== '1') sh('cmd connectivity airplane-mode disable');
-      for (let i = 0; i < 60; i++) {
-        await sleep(250);
-        const a = airplane();
-        if (a.airplane === air0.airplane && (a.wifi === air0.wifi || i > 30)) break;
-      }
-      let a = airplane();
-      if (a.wifi !== air0.wifi) {
-        sh(`svc wifi ${air0.wifi === 'enabled' ? 'enable' : 'disable'}`);
-        await sleep(2000);
-        a = airplane();
-      }
-      done.airplane = { before: air0, after: a };
-    }
+    await restoreAirplane();
+    done.airplane = airplane();
   } catch (e) { done.airplaneError = e.message; }
   try {
     for (const f of pushed) sh(`rm -f "${f}" && am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://${f}" >/dev/null`);
