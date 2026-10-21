@@ -14,7 +14,7 @@
 //      the tab; then cuts the recording (30 fps, the left half of the status bar painted over: other apps' icons)
 // usage: node demo/record/android-take.mjs --serial SERIAL --url http://localhost:8961/ --out DIR [--airplane]
 //        [--reverse PORT] [--photo examples/receipt.jpg] [--pdf examples/inventory-scan.pdf] [--failures record/out/failure]
-//        [--cdp-port 9339] [--rest-max 600] [--scout-only]
+//        [--cdp-port 9339] [--rest-max 600] [--scout-only] [--no-reopen]
 //        node demo/record/android-take.mjs --cut-only --out DIR   (the cut again from DIR/take-raw.mp4 and DIR/run.json)
 // --reverse PORT runs `adb reverse tcp:PORT tcp:PORT` for a page served on this machine (localhost is a secure context,
 // which the service worker needs). The phone must be unlocked.
@@ -39,6 +39,7 @@ const CDP_PORT = Number(opt('--cdp-port', 9339));
 const REST_MAX = Number(opt('--rest-max', 600)) * 1000;
 const SCOUT_ONLY = args.includes('--scout-only');
 const CUT_ONLY = args.includes('--cut-only');
+const REOPEN = !args.includes('--no-reopen');
 const HOLD_MS = 3000;
 const CHROME = 'com.android.chrome';
 if (!SERIAL && !CUT_ONLY) throw new Error('--serial is required');
@@ -185,9 +186,12 @@ function airplane() {
 
 // ---- the picker: from the screen's UI tree, the taps that reach a file ----
 
+// first the camera prompt Chrome raises for an image input ("only this time": nothing stays granted), then locations;
+// English and Japanese labels (the phone's language)
+const ONCE = ['Only this time', '今回のみ', 'Just once', 'JUST ONCE', 'Only once', '1 回のみ', '1回のみ'];
 const NAV = {
-  image: ['Pictures', 'Images', 'Files', 'My Files', 'Browse', 'Show roots', 'Recent', 'Just once', 'JUST ONCE', 'Only once'],
-  pdf: ['Downloads', 'Download', 'Documents', 'Files', 'My Files', 'Browse', 'Show roots', 'Recent', 'Just once', 'JUST ONCE', 'Only once'],
+  image: [...ONCE, 'Pictures', 'ピクチャ', 'Images', '画像', 'Files', 'ファイル', 'My Files', 'マイファイル', 'Browse', '参照', 'Show roots', 'ルートを表示', 'Recent', '最近'],
+  pdf: [...ONCE, 'Downloads', 'ダウンロード', 'Download', 'Documents', 'ドキュメント', 'Files', 'ファイル', 'My Files', 'マイファイル', 'Browse', '参照', 'Show roots', 'ルートを表示', 'Recent', '最近'],
 };
 function findFile(nodes, name) {
   const stem = name.replace(/\.[^.]+$/, '');
@@ -402,7 +406,7 @@ async function main() {
   }
 
   // the page opened again with airplane mode on: what it says (recorded, not a condition of the take)
-  if (AIRPLANE) {
+  if (AIRPLANE && REOPEN) {
     air0 = airplane();
     sh('cmd connectivity airplane-mode enable');
     for (let i = 0; i < 40; i++) { await sleep(250); const a = airplane(); if (a.airplane === '1' && a.wifi === 'disabled') break; }

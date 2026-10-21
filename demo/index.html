@@ -86,7 +86,7 @@
     <section id="about" class="about" aria-label="About this page">
       <h2>What this page does</h2>
       <p>Photos and screenshots are read with <code>worker.recognize(file)</code>: every text line, its box, in reading order. PDFs, scans and the Markdown and JSON tabs use <code>convert(file)</code>: pages with a text layer are read from it, scanned pages by OCR, and the lines become headings, paragraphs, lists and tables.</p>
-      <p>Your files are read in this tab. The page downloads only the litert-ocr library and pdf.js from jsDelivr and the model files from Hugging Face, once: about 80 MB on the first visit (Chrome 155 on a Mac, 2026-10-22). The browser keeps them, and after that first visit the page opens and reads with no network (tested in Chrome).</p>
+      <p>Your files are read in this tab. The page downloads only the litert-ocr library and pdf.js from jsDelivr and the model files from Hugging Face, once: about 80 MB on the first visit (Chrome 155 on a Mac, 2026-10-22). The browser keeps them: an open page goes on reading with no network, and in Chrome on a Mac the page also opened again with no network.</p>
       <p>The time shown is from handing the file to the library to the result, with the model already loaded. PDFs are read up to 20 pages per file here.</p>
       <p><a href="https://github.com/john-rocky/litert-ocr">Source and documentation</a> · <a href="https://github.com/john-rocky/litert-ocr/tree/main/demo">This page's code</a> · <span id="version">litert-ocr 0.1.0</span></p>
     </section>
