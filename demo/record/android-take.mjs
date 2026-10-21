@@ -1,9 +1,9 @@
 // A take of the demo page in Chrome on an Android phone over adb, driven like a finger: the file button, the phone's
 // file picker, a photo; then the button again and a PDF. The phone records its own screen; the cut keeps the time from
 // choosing the file to the result as it was and shortens only the waits of the driver.
-//   1. the photo goes to Pictures and the PDF to Download (the media index scans both); Chrome opens the page and loads
-//      the model into its cache
-//   2. --airplane: airplane mode on (Wi-Fi off too), checked; the page opens again and must reach Ready without network
+//   1. the photo goes to Pictures and the PDF to Download, or both into Download/<--folder> (a folder of their own, so the
+//      picker shows only them); the media index scans them; Chrome opens the page and loads the model into its cache
+//   2. --airplane: airplane mode on under the open page (Wi-Fi off too, no network), checked
 //   3. scout: the picker is opened once per file and the taps that reach the file are found from the screen's UI tree,
 //      then the picker is closed without choosing (no file is read before the take)
 //   4. waits for a rested phone: thermal status 0, battery at most 36 C, no CPU clock cap (and Adreno level 0 if any)
@@ -12,9 +12,12 @@
 //      example, and a password PDF with a wrong and the right password
 //   7. restores airplane mode and Wi-Fi, removes the pushed files, clears the page's caches and service worker, closes
 //      the tab; then cuts the recording (30 fps, the left half of the status bar painted over: other apps' icons)
-// usage: node demo/record/android-take.mjs --serial SERIAL --url http://localhost:8961/ --out DIR [--airplane]
-//        [--reverse PORT] [--photo examples/receipt.jpg] [--pdf examples/inventory-scan.pdf] [--failures record/out/failure]
-//        [--cdp-port 9339] [--rest-max 600] [--scout-only] [--no-reopen]
+// usage: node demo/record/android-take.mjs --serial SERIAL --url URL --out DIR [--airplane] [--reverse PORT]
+//        [--folder litert-ocr-demo] [--photo examples/receipt.jpg] [--pdf examples/inventory-scan.pdf]
+//        [--failures URL-or-path] [--cdp-port 9339] [--rest-max 600] [--scout-only] [--no-reopen]
+// --url is the page as the phone opens it: the published page (https://john-rocky.github.io/litert-ocr/), or one served
+// on this machine with --reverse. --failures is a directory URL (or a path under --url) that holds the failure inputs
+// of make-inputs.mjs; the published page does not carry them.
 //        node demo/record/android-take.mjs --cut-only --out DIR   (the cut again from DIR/take-raw.mp4 and DIR/run.json)
 // --reverse PORT runs `adb reverse tcp:PORT tcp:PORT` for a page served on this machine (localhost is a secure context,
 // which the service worker needs). The phone must be unlocked.
@@ -23,6 +26,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
+import { center, nextStep, parseDump } from './picker.mjs';
 
 const DEMO = fileURLToPath(new URL('../', import.meta.url));
 const args = process.argv.slice(2);
@@ -35,6 +39,7 @@ const REVERSE = opt('--reverse', null);
 const PHOTO = join(DEMO, opt('--photo', 'examples/receipt.jpg'));
 const PDF = join(DEMO, opt('--pdf', 'examples/inventory-scan.pdf'));
 const FAILURES = opt('--failures', null);
+const FOLDER = opt('--folder', null);
 const CDP_PORT = Number(opt('--cdp-port', 9339));
 const REST_MAX = Number(opt('--rest-max', 600)) * 1000;
 const SCOUT_ONLY = args.includes('--scout-only');
@@ -68,14 +73,8 @@ function dump(tag) {
   const out = adb('exec-out', 'uiautomator', 'dump', '/dev/tty');
   const xml = out.slice(0, out.lastIndexOf('</hierarchy>') + '</hierarchy>'.length);
   if (tag) writeFileSync(join(OUT, `ui-${tag}.xml`), xml);
-  return [...xml.matchAll(/<node ([^>]*?)\/?>/g)].map((m) => {
-    const a = {};
-    for (const [, k, v] of m[1].matchAll(/([\w-]+)="([^"]*)"/g)) a[k] = v.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'");
-    const b = /\[(\d+),(\d+)\]\[(\d+),(\d+)\]/.exec(a.bounds ?? '');
-    return { text: a.text ?? '', desc: a['content-desc'] ?? '', id: a['resource-id'] ?? '', cls: a.class ?? '', pkg: a.package ?? '', clickable: a.clickable === 'true', box: b ? b.slice(1).map(Number) : null };
-  }).filter((n) => n.box && n.box[2] > n.box[0] && n.box[3] > n.box[1]);
+  return parseDump(xml);
 }
-const center = (n) => [Math.round((n.box[0] + n.box[2]) / 2), Math.round((n.box[1] + n.box[3]) / 2)];
 const tap = ([x, y], what) => { sh(`input tap ${x} ${y}`); log(`tap ${what}`, { x, y, device: now() }); };
 function screenshot(name) {
   const png = adbRaw('exec-out', 'screencap', '-p');
@@ -186,37 +185,22 @@ function airplane() {
 
 // ---- the picker: from the screen's UI tree, the taps that reach a file ----
 
-// first the camera prompt Chrome raises for an image input ("only this time": nothing stays granted), then locations;
-// English and Japanese labels (the phone's language)
-const ONCE = ['Only this time', '今回のみ', 'Just once', 'JUST ONCE', 'Only once', '1 回のみ', '1回のみ'];
-const NAV = {
-  image: [...ONCE, 'Pictures', 'ピクチャ', 'Images', '画像', 'Files', 'ファイル', 'My Files', 'マイファイル', 'Browse', '参照', 'Show roots', 'ルートを表示', 'Recent', '最近'],
-  pdf: [...ONCE, 'Downloads', 'ダウンロード', 'Download', 'Documents', 'ドキュメント', 'Files', 'ファイル', 'My Files', 'マイファイル', 'Browse', '参照', 'Show roots', 'ルートを表示', 'Recent', '最近'],
-};
-function findFile(nodes, name) {
-  const stem = name.replace(/\.[^.]+$/, '');
-  return nodes.find((n) => n.text === name || n.desc === name) ?? nodes.find((n) => n.text.startsWith(stem) || n.desc.includes(name));
-}
-/** In the picker: tap through the locations until the file shows; tap the file only when `choose`. */
+/** In the picker: tap through the steps (picker.mjs) until the file shows; tap the file only when `choose`. */
 async function reachFile(kind, name, tag, choose) {
   const steps = [];
-  const used = new Set();
-  for (let i = 0; i < 6; i++) {
+  const state = { kind, name, folder: FOLDER, used: new Set(), inFolder: false };
+  for (let i = 0; i < 8; i++) {
     await sleep(700);
-    const nodes = dump(`${tag}-${i}`);
-    const pkg = nodes.find((n) => n.pkg)?.pkg ?? '';
-    if (pkg === CHROME) return { ok: false, steps, why: 'the picker closed' };
-    const file = findFile(nodes, name);
-    if (file) {
-      steps.push({ step: 'file', label: file.text || file.desc, pkg, at: center(file) });
-      if (choose) tap(center(file), `file ${name}`);
+    const st = nextStep(dump(`${tag}-${i}`), state, CHROME);
+    if (st.step === 'closed' || st.step === 'none') return { ok: false, steps, why: st.why };
+    steps.push({ step: st.step, label: st.label, pkg: st.pkg, at: center(st.node) });
+    if (st.step === 'file') {
+      if (choose) tap(center(st.node), `file ${name}`);
       return { ok: true, steps };
     }
-    const nav = NAV[kind].map((label) => nodes.find((n) => (n.text === label || n.desc === label) && !used.has(label))).find(Boolean);
-    if (!nav) return { ok: false, steps, why: `no ${name} and no known location in the picker (${pkg})` };
-    used.add(nav.text || nav.desc);
-    steps.push({ step: 'location', label: nav.text || nav.desc, pkg, at: center(nav) });
-    tap(center(nav), `picker ${nav.text || nav.desc}`);
+    state.used.add(st.label);
+    if (st.entersFolder) state.inFolder = true;
+    tap(center(st.node), `picker ${st.label}`);
   }
   return { ok: false, steps, why: 'too many steps' };
 }
@@ -249,8 +233,10 @@ let recorder = null;
 const pushed = [];
 let air0 = null;
 let wifiTurnedOff = false;
-const devPhoto = `/sdcard/Pictures/${basename(PHOTO)}`;
-const devPdf = `/sdcard/Download/${basename(PDF)}`;
+const devDir = FOLDER ? `/sdcard/Download/${FOLDER}` : null;
+const devPhoto = devDir ? `${devDir}/${basename(PHOTO)}` : `/sdcard/Pictures/${basename(PHOTO)}`;
+const devPdf = devDir ? `${devDir}/${basename(PDF)}` : `/sdcard/Download/${basename(PDF)}`;
+let madeDir = false;
 
 async function main() {
   run.device = { model: sh('getprop ro.product.model').trim(), android: sh('getprop ro.build.version.release').trim(), size: sh('wm size').trim(), density: sh('wm density').trim() };
@@ -258,7 +244,12 @@ async function main() {
   if (/=true/.test(lock)) throw new Error('the phone is locked: unlock it first');
   if (REVERSE) adb('reverse', `tcp:${REVERSE}`, `tcp:${REVERSE}`);
   adb('forward', `tcp:${CDP_PORT}`, 'localabstract:chrome_devtools_remote');
-  // the files, newest in the media index
+  // the files, newest in the media index (in a folder of their own: never one that is already there)
+  if (devDir) {
+    if (sh(`[ -e "${devDir}" ] && echo there || true`).trim() === 'there') throw new Error(`${devDir} already exists on the phone`);
+    sh(`mkdir -p "${devDir}"`);
+    madeDir = true;
+  }
   for (const [local, dev] of [[PHOTO, devPhoto], [PDF, devPdf]]) {
     // never over a file that is already there (it would be removed at the end)
     if (sh(`[ -e "${dev}" ] && echo there || true`).trim() === 'there') throw new Error(`${dev} already exists on the phone`);
@@ -472,7 +463,8 @@ async function cleanup() {
   } catch (e) { done.airplaneError = e.message; }
   try {
     for (const f of pushed) sh(`rm -f "${f}" && am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://${f}" >/dev/null`);
-    done.removed = pushed;
+    if (madeDir) sh(`rmdir "${devDir}" && am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "file://${devDir}" >/dev/null`);
+    done.removed = madeDir ? [...pushed, devDir] : pushed;
   } catch (e) { done.files = e.message; }
   try { adb('forward', '--remove', `tcp:${CDP_PORT}`); } catch { /* not set */ }
   try { if (REVERSE) adb('reverse', '--remove', `tcp:${REVERSE}`); } catch { /* not set */ }
