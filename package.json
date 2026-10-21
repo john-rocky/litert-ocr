@@ -49,7 +49,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "litert-ocr": "./dist/cli.js"
+    "litert-ocr": "dist/cli.js"
   },
   "files": [
     "dist",
