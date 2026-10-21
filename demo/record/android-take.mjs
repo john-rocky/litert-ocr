@@ -274,9 +274,10 @@ async function main() {
       a = airplane();
     }
     const ping = (() => { try { sh('ping -c 1 -W 2 8.8.8.8'); return 'answered'; } catch { return 'no answer'; } })();
-    run.airplane = { before: air0, during: a, ping, wifiTurnedOff };
+    const network = sh('dumpsys connectivity | grep -m1 "Active default network"').trim();
+    run.airplane = { before: air0, during: a, ping, network, wifiTurnedOff };
     log('airplane mode', run.airplane);
-    check('airplane mode on, Wi-Fi off, no network', a.airplane === '1' && a.wifi === 'disabled' && ping === 'no answer', run.airplane);
+    check('airplane mode on, Wi-Fi off, no network', a.airplane === '1' && a.wifi === 'disabled' && ping === 'no answer' && /none/i.test(network), run.airplane);
   }
   await page.send('Page.reload', { ignoreCache: false });
   await sleep(1000);
@@ -285,7 +286,7 @@ async function main() {
   run.visit2 = { info: st.info, isolated: st.isolated, bytes: st.bytes, notes: st.notes, onLine: await evaluate('navigator.onLine') };
   log('visit 2 ready', { network: st.bytes.network, cache: st.bytes.cache, onLine: run.visit2.onLine });
   check('the page opened again and reached Ready (model from the cache)', st.bytes.network === 0 && st.bytes.cache > 0, run.visit2.bytes);
-  await evaluate(`navigator.wakeLock?.request('screen').then(() => 'held', (e) => 'refused: ' + e.message)`, { userGesture: true });
+  run.wakeLock = await evaluate(`navigator.wakeLock ? navigator.wakeLock.request('screen').then(() => 'held', (e) => 'refused: ' + e.message) : 'no API'`, { userGesture: true });
 
   // scout the picker for both files without choosing
   const button0 = await buttonAt();
