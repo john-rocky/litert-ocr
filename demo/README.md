@@ -30,7 +30,7 @@ node demo/record/serve.mjs          # http://localhost:8080/
 
 ## How the page is made
 
-- [`app.js`](app.js): the page. It loads `https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm`, starts one worker with `createWorker()` for images and one converter with `createConverter({ eager: true, layout: 'geometry' })` for documents (warmed with a blank one-page PDF, so pdf.js and all model files are loaded before the first PDF), and reads one file at a time.
+- [`app.js`](app.js): the page. It loads `https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm`, starts one worker with `createWorker('eng', 1, { eager: true })` for images (all five model files at start, so a read never waits for a recognizer to load) and one converter with `createConverter({ eager: true, layout: 'geometry' })` for documents (it finds the files in the cache, and reads a blank one-page PDF first, so pdf.js is loaded before the first PDF), and reads one file at a time.
 - [`md.js`](md.js): draws the Markdown that `convert()` writes; every piece of text is set as text, never as HTML.
 - [`coi-serviceworker.js`](coi-serviceworker.js): coi-serviceworker 0.1.7 (MIT), with one addition marked in the file: the service worker keeps a copy of the page's own files and of the pinned library module and answers from it when there is no network.
 

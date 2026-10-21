@@ -1,8 +1,8 @@
 // First and second visit of the demo page in Chrome over the DevTools protocol, and a later visit with no network:
 //   - time from opening the page to the result of a file handed to the file input as soon as the page says Ready
 //   - bytes over the network: Network.loadingFinished.encodedDataLength of every target (the page, the OCR workers
-//     and their threads, the service worker), responses answered by the service worker left out (the service
-//     worker's own request is counted), up to that result and up to the end of the downloads in the background
+//     and their threads, the service worker), each request once, responses answered by the service worker left out (the
+//     service worker's own request is counted), up to that result and up to the end of the downloads in the background
 //   - the hosts the page contacted
 //   - offline (--offline): Chrome started again on the same profile with every host name unresolvable and this
 //     server stopped, the page opened, a photo and a PDF read
@@ -76,9 +76,11 @@ async function launch(profile, extra = []) {
   });
   const cdp = await cdpConnect(wsUrl);
   // every target, the service worker included; each one's network counted
-  const net = { bytes: 0, byHost: {}, hosts: new Set(), requests: new Map(), sw: new Set(), failed: [] };
-  // one session per target, the one auto-attach made (a second session on a target would count its bytes twice)
+  const net = { bytes: 0, byHost: {}, hosts: new Set(), requests: new Map(), sw: new Set(), counted: new Set(), failed: [] };
+  // a target can have two sessions (a service worker is attached from the browser and again as a child of the page it
+  // controls; each session reports the same requests): requests are keyed by target, and each is counted once
   const sessions = new Map();
+  const targetOf = new Map();
   // sent in order without waiting for each answer: a target paused at its start (a service worker) answers only
   // after it runs, so waiting for Network.enable before letting it run would keep it paused
   const attach = (sid) => {
@@ -87,9 +89,10 @@ async function launch(profile, extra = []) {
     cdp.send('Runtime.runIfWaitingForDebugger', {}, sid).catch(() => {});
   };
   cdp.on((m) => {
-    const key = `${m.sessionId}|${m.params?.requestId}`;
+    const key = `${targetOf.get(m.sessionId) ?? m.sessionId}|${m.params?.requestId}`;
     if (m.method === 'Target.attachedToTarget') {
-      sessions.set(m.params.targetInfo.targetId, m.params.sessionId);
+      targetOf.set(m.params.sessionId, m.params.targetInfo.targetId);
+      if (!sessions.has(m.params.targetInfo.targetId)) sessions.set(m.params.targetInfo.targetId, m.params.sessionId);
       attach(m.params.sessionId);
     }
     else if (m.method === 'Network.requestWillBeSent') {
@@ -104,7 +107,8 @@ async function launch(profile, extra = []) {
       if (m.params.response.fromServiceWorker) net.sw.add(key);
     } else if (m.method === 'Network.loadingFinished') {
       const host = net.requests.get(key);
-      if (host && !net.sw.has(key)) {
+      if (host && !net.sw.has(key) && !net.counted.has(key)) {
+        net.counted.add(key);
         net.bytes += m.params.encodedDataLength;
         net.byHost[host] = (net.byHost[host] ?? 0) + m.params.encodedDataLength;
       }

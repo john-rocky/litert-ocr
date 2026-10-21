@@ -41,15 +41,17 @@ async function boot() {
   }
   setStatus('busy', 'Loading the model…');
   const t0 = performance.now();
-  // prefetch off: the converter below loads every model file at start, so the cache gets them once
-  worker = await lib.createWorker('eng', 1, { logger: logger('worker'), prefetch: false });
+  // all five model files at start (eager): a read never waits for a recognizer to load, and the converter below
+  // finds every file in the cache (each file is downloaded once)
+  worker = await lib.createWorker('eng', 1, { logger: logger('worker'), eager: true, prefetch: false });
   demoState.info = { ...worker.info, startMs: Math.round(performance.now() - t0) };
   demoState.readyAt = Date.now();
   demoState.phase = 'ready';
   setStatus('ready', 'Ready');
   showInfo();
   enableInput();
-  converterReady = startConverter();
+  // the first job in the line: a file given meanwhile waits for it instead of sharing the CPU with it
+  converterReady = enqueue(startConverter);
 }
 
 /**
