@@ -174,8 +174,8 @@ function airplane() {
 // ---- the picker: from the screen's UI tree, the taps that reach a file ----
 
 const NAV = {
-  image: ['Pictures', 'Images', 'Files', 'My Files', 'Browse', 'Show roots', 'Recent'],
-  pdf: ['Downloads', 'Download', 'Documents', 'Files', 'My Files', 'Browse', 'Show roots', 'Recent'],
+  image: ['Pictures', 'Images', 'Files', 'My Files', 'Browse', 'Show roots', 'Recent', 'Just once', 'JUST ONCE', 'Only once'],
+  pdf: ['Downloads', 'Download', 'Documents', 'Files', 'My Files', 'Browse', 'Show roots', 'Recent', 'Just once', 'JUST ONCE', 'Only once'],
 };
 function findFile(nodes, name) {
   const stem = name.replace(/\.[^.]+$/, '');
