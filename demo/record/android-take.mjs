@@ -16,8 +16,9 @@
 //        [--folder litert-ocr-demo] [--photo examples/receipt.jpg] [--pdf examples/inventory-scan.pdf]
 //        [--failures URL-or-path] [--cdp-port 9339] [--rest-max 600] [--scout-only] [--no-reopen]
 // --url is the page as the phone opens it: the published page (https://john-rocky.github.io/litert-ocr/), or one served
-// on this machine with --reverse. --failures is a directory URL (or a path under --url) that holds the failure inputs
-// of make-inputs.mjs; the published page does not carry them.
+// on this machine with --reverse. --failures is the directory (a path under --url) that holds the failure inputs of
+// make-inputs.mjs; the page fetches them itself, so they must be on the page's own server: the published page does not
+// carry them (run the failure paths on a page served here).
 //        node demo/record/android-take.mjs --cut-only --out DIR   (the cut again from DIR/take-raw.mp4 and DIR/run.json)
 // --reverse PORT runs `adb reverse tcp:PORT tcp:PORT` for a page served on this machine (localhost is a secure context,
 // which the service worker needs). The phone must be unlocked.
