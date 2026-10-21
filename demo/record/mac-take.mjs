@@ -1,7 +1,8 @@
 // A take of the demo page in desktop Chrome: the page alone (headless Chrome, 1440 x 900; nothing else on the screen
 // is filmed), driven like a person: the file button, the browser's file chooser, a photo; then the button again and a
 // scanned PDF. The page is visited once first (the model goes into the cache), then opened again and filmed from Ready.
-//   1. rehearsal: screenshots of Ready and of both results (ready.png, screen1.png, screen2.png) and a run JSON
+//   1. rehearsal: screenshots of Ready and of both results (ready.png, screen1.png, screen2.png; the same in a
+//      390 x 844 page, the layout of a phone: phone-ready.png, phone-screen1.png, phone-screen2.png) and a run JSON
 //   2. with --go FILE: waits for FILE to appear (someone looked at the screenshots; FILE.no = do not film), then films
 //      the same two screens with the DevTools screencast and makes take.mp4 (H.264, 30 fps constant, ffmpeg)
 // usage: node demo/record/mac-take.mjs --out DIR [--go FILE] [--go-timeout 300] [--photo examples/receipt.jpg]
@@ -75,6 +76,21 @@ const r2 = await pick(page, PDF);
 await sleep(500);
 await page.screenshot({ path: join(OUT, 'screen2.png') });
 run.rehearsal = { info: state.info, isolated: state.isolated, screens: [summary(r1, s1), summary(r2, await shown(page))] };
+await page.close();
+
+// the same two results in a phone-sized page (390 x 844 CSS pixels): the layout a phone shows
+page = await context.newPage();
+await page.setViewportSize({ width: 390, height: 844 });
+await ready(page);
+await page.screenshot({ path: join(OUT, 'phone-ready.png') });
+const p1 = await pick(page, PHOTO);
+await sleep(500);
+await page.screenshot({ path: join(OUT, 'phone-screen1.png') });
+const ps1 = await shown(page);
+const p2 = await pick(page, PDF);
+await sleep(500);
+await page.screenshot({ path: join(OUT, 'phone-screen2.png') });
+run.rehearsal.phone = [summary(p1, ps1), summary(p2, await shown(page))];
 await page.close();
 writeFileSync(join(OUT, 'run.json'), JSON.stringify(run, null, 2));
 console.log(`rehearsal: ${JSON.stringify(run.rehearsal.screens.map((s) => [s.file, Math.round(s.screenMs), s.lines]))}; screenshots in ${OUT}`);
