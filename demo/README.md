@@ -6,7 +6,7 @@ A page that reads your own files with litert-ocr in the browser tab: https://joh
 - **PDFs and scans**: Markdown with headings, lists and tables (`convert()`). A page with a text layer is read from it; a scanned page is read by OCR.
 - **JSON**: the document structure that `convert(file, { to: 'json' })` returns: pages, blocks with their type and box, tables as rows of cells.
 
-Your files are read in the tab and are not uploaded. The page downloads the litert-ocr library and pdf.js from jsDelivr and the model files from Hugging Face, once; the browser keeps them for later visits.
+Your files are read in the tab and are not uploaded. The page downloads the litert-ocr library and pdf.js from jsDelivr and the model files from Hugging Face, once, and the browser keeps them. Measured in Chrome 155 on a Mac Studio (Apple M4 Max), 2026-10-22, three new profiles: the first visit downloaded 80.2 MB and showed the first result 5.7 s after the page was opened (median); a second visit downloaded nothing and took 1.3 s; with the network gone (no host name resolving, the page's server stopped), the page opened again and read a photo and a PDF.
 
 ## Use it with your own files
 
