@@ -33,7 +33,7 @@ const DEMO = fileURLToPath(new URL('../', import.meta.url));
 const args = process.argv.slice(2);
 const opt = (n, d) => (args.includes(n) ? args[args.indexOf(n) + 1] : d);
 const SERIAL = opt('--serial', null);
-const URL0 = opt('--url', 'http://localhost:8961/');
+const URL0 = opt('--url', 'http://localhost:8080/'); // serve.mjs's default port
 const OUT = opt('--out', join(DEMO, 'record/out/android-take'));
 const AIRPLANE = args.includes('--airplane');
 const REVERSE = opt('--reverse', null);
