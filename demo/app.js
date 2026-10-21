@@ -205,6 +205,7 @@ async function run(file, job) {
     job.endedAt = Date.now();
     job.done = true;
     if (demoState.phase === 'ready') setStatus('ready', 'Ready');
+    reveal();
   }
 }
 
@@ -355,6 +356,7 @@ function askPassword(file, job, e, wrong) {
         again.endedAt = Date.now();
         again.done = true;
         setStatus('ready', 'Ready');
+        reveal();
       }
     });
   };
@@ -426,9 +428,12 @@ function showFile(file, job) {
 
 function showResult() {
   $('result').hidden = false;
-  if (window.matchMedia('(max-width: 960px)').matches) {
-    ($('figure').hidden ? $('result') : $('figure')).scrollIntoView({ block: 'start' });
-  }
+}
+
+/** On a narrow screen, bring the image (or the result) to the top once the job has drawn everything. */
+function reveal() {
+  if (!window.matchMedia('(max-width: 960px)').matches || $('result').hidden) return;
+  requestAnimationFrame(() => ($('figure').hidden ? $('result') : $('figure')).scrollIntoView({ block: 'start' }));
 }
 
 function showTime(ms, detail) {

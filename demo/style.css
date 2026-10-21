@@ -36,7 +36,7 @@ code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .notes { margin: 6px 0 0 17px; padding: 0; list-style: none; font-size: 13px; color: var(--warn); }
 .notes li { margin: 2px 0; }
 
-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding: 12px 24px 28px; align-items: start; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; padding: 12px 24px 28px; align-items: start; overflow-anchor: none; }
 .input, .result, .about { min-width: 0; }
 .about { grid-column: 1 / -1; color: var(--muted); font-size: 13.5px; max-width: 900px; }
 .about h2 { font-size: 15px; color: var(--ink); margin: 8px 0 4px; }
