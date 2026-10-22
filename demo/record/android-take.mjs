@@ -380,7 +380,7 @@ async function main() {
     const job = await waitRun(n);
     await keepFrames(hold + 1000);
     const shown = await evaluate(shownExpr);
-    run.screens.push({ kind, file: name, tapButton, tapFile, startedAt: job?.startedAt, endedAt: job?.endedAt, screenMs: job?.ms, lines: job?.lines ?? null, markdown: job?.markdown ?? null, text: job?.text ?? null, error: job?.error ?? null, pdfPage: job?.pdfPage ?? null, shown, steps: pick.steps, rest: rest() });
+    run.screens.push({ kind, file: name, tapButton, tapFile, startedAt: job?.startedAt, endedAt: job?.endedAt, screenMs: job?.ms, lines: job?.lines ?? null, markdown: job?.markdown ?? null, text: job?.text ?? null, error: job?.error ?? null, pdfPage: job?.pdfPage ?? null, blocks: job?.json ? JSON.parse(job.json).pages.map((p) => p.blocks.length) : null, shown, steps: pick.steps, rest: rest() });
     log(`result ${kind}`, { screenMs: job?.ms, lines: job?.lines?.length, shown });
     await sleep(hold);
   }
