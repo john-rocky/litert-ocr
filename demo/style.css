@@ -11,6 +11,11 @@
   --bad: #b3261e;
   --box: #e8590c;
   --box-fill: rgba(232, 89, 12, 0.10);
+  /* frames of a PDF page's blocks, by type */
+  --k-heading: #9c36b5;
+  --k-paragraph: #1971c2;
+  --k-list: #2b8a3e;
+  --k-table: #e8590c;
   font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -58,16 +63,28 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:
 
 .figure { margin: 14px 0 0; }
 .stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; background: var(--card); border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
-.stage img { display: block; max-width: 100%; max-height: calc(100vh - 250px); width: auto; height: auto; }
+.stage img, .stage canvas { display: block; max-width: 100%; max-height: calc(100vh - 250px); width: auto; height: auto; }
 .boxes { position: absolute; left: 0; top: 0; pointer-events: none; }
 .boxes rect { fill: var(--box-fill); stroke: var(--box); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .boxes rect.hot { fill: rgba(29, 95, 214, 0.25); stroke: var(--accent); stroke-width: 3; }
+.boxes rect.block { fill: var(--c); stroke: var(--c); fill-opacity: 0.1; stroke-width: 2.5; }
+.block.heading, .key.heading { --c: var(--k-heading); }
+.block.paragraph, .key.paragraph { --c: var(--k-paragraph); }
+.block.list_item, .key.list_item { --c: var(--k-list); }
+.block.table, .key.table { --c: var(--k-table); }
 .figure figcaption { margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.pager { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.pager button { font: inherit; font-size: 15px; line-height: 1; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); cursor: pointer; }
+.pager button:disabled { color: #b4bac3; cursor: default; }
+.legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; color: var(--ink); }
+.key { display: inline-flex; align-items: center; gap: 5px; }
+.key::before { content: ''; width: 10px; height: 10px; border: 2px solid var(--c); border-radius: 2px; background: color-mix(in srgb, var(--c) 14%, transparent); }
 
 .result { background: var(--card); border-radius: 12px; padding: 14px 16px 16px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
 .headline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
 .took { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
 .took .unit { font-size: 0.55em; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+.took .value { white-space: nowrap; }
 .took-detail { margin: 0; color: var(--muted); font-size: 13px; }
 
 .error { margin: 10px 0 0; border-left: 4px solid var(--bad); background: #fdf2f1; padding: 10px 12px; border-radius: 6px; }
@@ -116,4 +133,12 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:
   .stage img { max-height: 46vh; }
   .pane { max-height: none; }
   .took { font-size: 26px; }
+  /* a PDF's page beside the time, so the page, the time and the top of the result fit one phone screen */
+  .result.with-page { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 12px; align-items: start; }
+  .result.with-page > .figure { display: contents; }
+  .result.with-page .stage { grid-column: 1; grid-row: 1 / span 2; display: block; }
+  .result.with-page .stage canvas { max-height: 46vh; }
+  .result.with-page .headline { grid-column: 2; grid-row: 1; display: block; }
+  .result.with-page figcaption { grid-column: 2; grid-row: 2; margin: 8px 0 0; }
+  .result.with-page > :not(.figure):not(.headline) { grid-column: 1 / -1; }
 }

@@ -4,6 +4,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Chrome still offers to translate a page marked translate="no" (on a phone set to another language); this stops the offer -->
+  <meta name="google" content="notranslate">
   <meta name="color-scheme" content="light">
   <title>litert-ocr: photo, scan or PDF to text, Markdown and JSON</title>
   <meta name="description" content="Drop a photo, screenshot, scan or PDF: the text with its line boxes, Markdown with tables, and JSON, read in this browser tab. Nothing is uploaded.">
@@ -45,9 +47,14 @@
       <figure id="figure" class="figure" hidden>
         <div class="stage">
           <img id="image" alt="The file being read">
+          <canvas id="page" class="page" role="img" aria-label="The PDF page being read" hidden></canvas>
           <svg id="boxes" class="boxes" aria-hidden="true"></svg>
         </div>
-        <figcaption id="caption"></figcaption>
+        <figcaption>
+          <span id="caption"></span>
+          <span id="pager" class="pager" hidden><button type="button" id="prev" aria-label="Previous page">‹</button><button type="button" id="next" aria-label="Next page">›</button></span>
+          <span id="legend" class="legend" hidden></span>
+        </figcaption>
       </figure>
     </section>
 
@@ -55,6 +62,7 @@
       <div class="headline">
         <p id="took" class="took"></p>
         <p id="took-detail" class="took-detail"></p>
+        <p id="reading" class="took-detail" hidden></p>
       </div>
       <div id="error" class="error" role="alert" hidden>
         <p id="error-title" class="error-title"></p>
@@ -85,7 +93,7 @@
 
     <section id="about" class="about" aria-label="About this page">
       <h2>What this page does</h2>
-      <p>Photos and screenshots: every text line and its box, in reading order (<code>worker.recognize(file)</code>). PDFs, scans and the Markdown and JSON tabs: pages with a text layer are read from it, scanned pages by OCR, and the lines become headings, paragraphs, lists and tables (<code>convert(file)</code>).</p>
+      <p>Photos and screenshots: every text line and its box, in reading order (<code>worker.recognize(file)</code>). PDFs, scans and the Markdown and JSON tabs: pages with a text layer are read from it, scanned pages by OCR, and the lines become headings, paragraphs, lists and tables (<code>convert(file)</code>). A PDF's page is shown with a frame around each heading, paragraph, list item and table that <code>convert()</code> found on it, coloured by type; the arrows under the page turn the pages read.</p>
       <p>Your files are read in this tab. The page downloads only the litert-ocr library, its LiteRT.js runtime and pdf.js from jsDelivr, and the model files from Hugging Face, once: about 80 MB over the network on the first visit (Chrome 155 on a Mac, 2026-10-22; 87 MB uncompressed, the size the status line shows). The browser keeps them. A page that is already open goes on reading with no network (tested in Chrome on a Mac and on an Android phone in airplane mode). Opening the page again with no network worked in Chrome on a Mac, not in Chrome on Android.</p>
       <p>The time shown is from handing the file to the library to the result, with the model already loaded. PDFs are read up to 20 pages per file here.</p>
       <p><a href="https://github.com/john-rocky/litert-ocr">Source and documentation</a> · <a href="https://github.com/john-rocky/litert-ocr/tree/main/demo">This page's code</a> · <span id="version">litert-ocr 0.1.0</span></p>

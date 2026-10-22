@@ -1,6 +1,7 @@
 // litert-ocr demo: a photo, screenshot, scan or PDF -> the text with its line boxes, Markdown with tables, and JSON.
 // Everything runs in this tab. Photos and screenshots go to worker.recognize() (lines and their boxes); PDFs, and the
-// Markdown and JSON tabs of an image, go to converter.convert(). One file is read at a time.
+// Markdown and JSON tabs of an image, go to converter.convert(). One file is read at a time. A PDF's page is drawn
+// with pdf.js (the files the library pins) before it is read, and the blocks convert() finds are framed on it.
 // The record tools (record/) read window.demoState and window.demoRuns (one entry per file read).
 
 import { renderMarkdown } from './md.js';
@@ -8,18 +9,30 @@ import { renderMarkdown } from './md.js';
 const LIBRARY = 'https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm';
 /** Pages read per PDF on this page; the library itself reads up to `maxPages` (default 100). */
 const MAX_PAGES = 20;
+/** convert() reads PDF pages at 150 dpi; block boxes are in pixels of that size. */
+const PDF_SCALE = 150 / 72;
+const SVG = 'http://www.w3.org/2000/svg';
+/** Block types of convert() with the words of the legend. */
+const KINDS = [['heading', 'heading', 'headings'], ['paragraph', 'paragraph', 'paragraphs'], ['list_item', 'list item', 'list items'], ['table', 'table', 'tables']];
 
 const $ = (id) => document.getElementById(id);
-const demoState = (window.demoState = { phase: 'starting', isolated: self.crossOriginIsolated === true, info: null, converter: 'waiting', notes: [], bytes: { network: 0, cache: 0 }, error: null });
+const narrow = window.matchMedia('(max-width: 960px)');
+const demoState = (window.demoState = { phase: 'starting', isolated: self.crossOriginIsolated === true, info: null, converter: 'waiting', pdfPages: 'waiting', notes: [], notKept: [], bytes: { network: 0, cache: 0 }, error: null });
 const demoRuns = (window.demoRuns = []);
 const ui = { tab: 'text', source: false };
 let current = null;
 let queue = Promise.resolve();
+let pending = 0;
 let jobNotes = null;
 let lib = null;
 let worker = null;
 let converter = null;
 let converterReady = null;
+let pdfjsLoad = null;
+/** The pdf.js document of the PDF shown (closed when the next file comes). */
+let pdfOpen = null;
+/** Coordinates of the boxes layer when a PDF page is shown: the page's size in convert()'s pixels. */
+let pageSpace = null;
 
 boot().catch((e) => {
   demoState.phase = 'failed';
@@ -50,8 +63,9 @@ async function boot() {
   setStatus('ready', 'Ready');
   showInfo();
   enableInput();
-  // the first job in the line: a file given meanwhile waits for it instead of sharing the CPU with it
+  // the first jobs in the line: a file given meanwhile waits for them instead of sharing the CPU with them
   converterReady = enqueue(startConverter);
+  enqueue(startPdfPages);
 }
 
 /**
@@ -92,6 +106,44 @@ async function startConverter() {
   showInfo();
 }
 
+/** pdf.js for drawing PDF pages, loaded once after the converter's start (so the first PDF does not wait for it). */
+async function startPdfPages() {
+  demoState.pdfPages = 'loading';
+  try {
+    await pdfReader();
+    demoState.pdfPages = 'ready';
+  } catch (e) {
+    demoState.pdfPages = 'failed';
+    demoState.pdfPagesError = errorRecord(e);
+    note(`PDF pages cannot be shown here (${e?.message ?? e}); PDFs are still read.`);
+  }
+}
+
+/** The page's own pdf.js: the two files the library pins (modelInfo.pdfjs: the same URLs, sizes and sha256), started
+ * from blob: URLs as the library does, so its worker runs on this page's origin. A failed load is tried again later. */
+function pdfReader() {
+  pdfjsLoad ??= (async () => {
+    const { base, files } = lib.modelInfo.pdfjs;
+    const load = async (f) => {
+      const url = new URL(f.file, base).href;
+      const resp = await fetch(url, { credentials: 'omit' });
+      if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
+      const bytes = new Uint8Array(await resp.arrayBuffer());
+      const sha = crypto.subtle ? Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (b) => b.toString(16).padStart(2, '0')).join('') : f.sha256;
+      if (bytes.byteLength !== f.bytes || sha !== f.sha256) throw new Error(`${url} is not the file the library pins`);
+      return URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
+    };
+    const [main, work] = await Promise.all([files.find((f) => !f.file.includes('worker')), files.find((f) => f.file.includes('worker'))].map(load));
+    const mod = await import(main);
+    mod.GlobalWorkerOptions.workerSrc = work;
+    return { mod, params: { cMapUrl: new URL('cmaps/', base).href, cMapPacked: true, standardFontDataUrl: new URL('standard_fonts/', base).href, wasmUrl: new URL('wasm/', base).href, iccUrl: new URL('iccs/', base).href } };
+  })().catch((e) => {
+    pdfjsLoad = null;
+    throw e;
+  });
+  return pdfjsLoad;
+}
+
 function logger(source) {
   const seen = new Map();
   return (m) => {
@@ -113,6 +165,12 @@ function logger(source) {
     if (m.status === 'notice' && m.message) {
       if (/^Recognizer on /.test(m.message)) return;
       if (/not cross-origin isolated/.test(m.message)) return; // said above in this page's words
+      // a file the browser would not store: the status line must not say the files are kept
+      const notKept = /^Could not cache (\S+)/.exec(m.message)?.[1];
+      if (notKept && !demoState.notKept.includes(notKept)) {
+        demoState.notKept.push(notKept);
+        showInfo();
+      }
       if (jobNotes) jobNotes.add(m.message);
       else note(m.message);
     }
@@ -124,7 +182,9 @@ function showInfo() {
   if (!i) return;
   const where = `Detector on ${i.detector === 'webgpu' ? 'WebGPU' : 'WebAssembly'}, recognizer on ${i.recognizer === 'webgpu' ? 'WebGPU' : i.recognizer === 'mixed' ? 'WebGPU and WebAssembly' : 'WebAssembly'}, ${i.threads} thread${i.threads === 1 ? '' : 's'}`;
   const mb = (b) => (b / 1e6).toFixed(1);
-  const files = demoState.bytes.network > 0 ? `files: ${mb(demoState.bytes.network)} MB from the network, kept for later visits` : 'files: from this browser’s cache';
+  const n = demoState.notKept.length;
+  const kept = n ? `this browser did not keep ${n} of them, so the next visit downloads ${n === 1 ? 'it' : 'them'} again` : 'kept for later visits';
+  const files = demoState.bytes.network > 0 ? `files: ${mb(demoState.bytes.network)} MB from the network, ${kept}` : 'files: from this browser’s cache';
   const pdf = demoState.converter === 'ready' ? '' : demoState.converter === 'failed' ? ' · PDF reader: not available' : ' · getting the PDF reader ready…';
   $('detail').textContent = `${where} · ${files}${pdf}`;
 }
@@ -171,6 +231,13 @@ function enableInput() {
   $('source').addEventListener('change', (e) => { ui.source = e.target.checked; paint(); });
   $('copy').addEventListener('click', copyTab);
   $('download').addEventListener('click', downloadTab);
+  $('prev').addEventListener('click', () => turnPage(-1));
+  $('next').addEventListener('click', () => turnPage(1));
+  narrow.addEventListener('change', () => {
+    if (!current?.pdf) return;
+    placeFigure();
+    fitBoxes();
+  });
 }
 
 const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
@@ -184,8 +251,13 @@ function read(file, how) {
 }
 
 function enqueue(fn) {
+  pending++;
+  paintPager();
   const p = queue.then(fn);
-  queue = p.catch(() => {});
+  queue = p.catch(() => {}).finally(() => {
+    pending--;
+    paintPager();
+  });
   return p;
 }
 
@@ -200,10 +272,16 @@ async function run(file, job) {
   setStatus('busy', `Reading ${job.name}…`);
   try {
     if (job.kind === 'image') await readImage(file, job);
-    else await readDocument(file, job);
+    else {
+      // the page on screen first, then the file to the library: the two never share the CPU, and the time shown
+      // stays the library's own
+      if (job.kind === 'pdf') await showPdf(current);
+      await readDocument(file, job);
+    }
   } finally {
     job.endedAt = Date.now();
     job.done = true;
+    $('reading').hidden = true;
     if (demoState.phase === 'ready') setStatus('ready', 'Ready');
     reveal();
   }
@@ -280,6 +358,10 @@ async function readDocument(file, job, password) {
   const how = [...new Set(pages.map((p) => (p.engine === 'layer' ? 'text layer' : p.engine === 'ocr' ? 'OCR' : p.status)))].join(' and ');
   const what = r.document.source.type === 'pdf' ? `${pages.length} page${pages.length === 1 ? '' : 's'} (${how})` : how;
   showTime(job.ms, `${what} · ${job.name}`);
+  if (current.pdf) {
+    current.pdf.pages = pages;
+    framePage(current);
+  }
   if (job.partial) addResultNote(`This PDF has ${total} pages; this page reads the first ${MAX_PAGES}. The library reads up to its maxPages option (100 by default), and any range with pages.`);
   const bad = pages.filter((p) => p.status === 'failed');
   for (const p of bad) addResultNote(`Page ${p.page} could not be read: ${p.reason}`);
@@ -351,10 +433,12 @@ function askPassword(file, job, e, wrong) {
       setStatus('busy', `Reading ${again.name}…`);
       again.startedAt = Date.now();
       try {
+        await showPdf(current, pw);
         await readDocument(file, again, pw);
       } finally {
         again.endedAt = Date.now();
         again.done = true;
+        $('reading').hidden = true;
         setStatus('ready', 'Ready');
         reveal();
       }
@@ -408,15 +492,22 @@ function showFile(file, job) {
   $('took').textContent = '';
   $('took-detail').textContent = '';
   for (const n of document.querySelectorAll('.result-note')) n.remove();
+  closePdf();
+  placeFigure();
   const fig = $('figure');
   const img = $('image');
   $('boxes').replaceChildren();
+  $('page').hidden = true;
+  $('legend').hidden = true;
+  pageSpace = null;
+  paintPager();
   if (img.dataset.url) URL.revokeObjectURL(img.dataset.url);
   if (job.kind === 'image') {
     const url = URL.createObjectURL(file);
     img.dataset.url = url;
     img.onerror = () => { fig.hidden = true; };
     img.src = url;
+    img.hidden = false;
     fig.hidden = false;
     $('caption').textContent = `${job.name} · ${(file.size / 1e6).toFixed(file.size < 1e5 ? 2 : 1)} MB`;
   } else {
@@ -426,14 +517,149 @@ function showFile(file, job) {
   }
 }
 
+/**
+ * A PDF's first page in the figure before the library reads the file, drawn by the page's own pdf.js; the frames come
+ * with the result. When pdf.js cannot open the file (damaged, or a password not given or not right) no figure is
+ * shown and the read goes on as before.
+ */
+async function showPdf(cur, password) {
+  const t0 = performance.now();
+  let task = null;
+  try {
+    const { mod, params } = await pdfReader();
+    task = mod.getDocument({ data: new Uint8Array(await cur.file.arrayBuffer()), isEvalSupported: false, verbosity: 0, ...params, ...(password !== undefined ? { password } : {}) });
+    const doc = await task.promise;
+    cur.pdf = pdfOpen = { task, doc, total: doc.numPages, index: 0, pages: null };
+    // laid out but not painted until the page is in it (the room it gets decides how sharp the page is drawn)
+    const shell = placeFigure() ? $('result') : $('figure');
+    shell.style.visibility = 'hidden';
+    if (shell === $('result')) $('result').hidden = false;
+    $('figure').hidden = false;
+    $('image').hidden = true;
+    $('page').hidden = false;
+    try {
+      await drawPdfPage(cur, 1);
+    } finally {
+      shell.style.visibility = '';
+    }
+    if (shell === $('result')) {
+      // the whole page on screen while it is read, the time to come beside it
+      $('reading').textContent = `Reading ${cur.job.name}…`;
+      $('reading').hidden = false;
+      $('result').scrollIntoView({ block: 'start' });
+    }
+    cur.job.pdfPage = { ms: performance.now() - t0, ...cur.pdf.drawn };
+  } catch (e) {
+    task?.destroy().catch(() => {});
+    if (pdfOpen?.task === task) pdfOpen = null;
+    cur.pdf = null;
+    cur.job.pdfPage = { ms: performance.now() - t0, error: errorRecord(e) };
+    $('figure').hidden = true;
+    $('page').hidden = true;
+    placeFigure();
+    $('result').hidden = true;
+  }
+}
+
+/** Page n (1-based) of the open PDF into the figure, as sharp as this screen shows it, at most convert()'s 150 dpi. */
+async function drawPdfPage(cur, n) {
+  const page = await cur.pdf.doc.getPage(n);
+  try {
+    const one = page.getViewport({ scale: 1 });
+    const canvas = $('page');
+    const room = $('result').classList.contains('with-page') ? canvas.parentElement.clientWidth : $('figure').parentElement.clientWidth;
+    const css = Math.min(room / one.width, (parseFloat(getComputedStyle(canvas).maxHeight) || Infinity) / one.height);
+    const scale = Math.max(0.25, Math.min(PDF_SCALE, css * (window.devicePixelRatio || 1)));
+    const vp = page.getViewport({ scale });
+    const off = document.createElement('canvas');
+    off.width = Math.ceil(vp.width);
+    off.height = Math.ceil(vp.height);
+    const ctx = off.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, off.width, off.height);
+    await page.render({ canvasContext: ctx, canvas: off, viewport: vp }).promise;
+    // into the shown canvas in one step: a page never shows half drawn
+    canvas.width = off.width;
+    canvas.height = off.height;
+    canvas.getContext('2d').drawImage(off, 0, 0);
+    watchSize();
+    cur.pdf.drawn = { page: n, scale, width: off.width, height: off.height };
+    $('caption').textContent = `Page ${n} of ${cur.pdf.total}`;
+  } finally {
+    page.cleanup();
+  }
+}
+
+function closePdf() {
+  pdfOpen?.task.destroy().catch(() => {});
+  pdfOpen = null;
+}
+
+/** Frames of the blocks convert() found on the page shown, coloured by block type, and the legend under the page. */
+function framePage(cur) {
+  const p = cur.pdf.pages[cur.pdf.index];
+  const g = document.createElementNS(SVG, 'g');
+  // an OCR page is read after it is turned back by its skew: the frames turn with the page as drawn
+  if (p.skew) g.setAttribute('transform', `rotate(${p.skew} ${p.width / 2} ${p.height / 2})`);
+  const count = {};
+  for (const b of p.blocks) {
+    const [x0, y0, x1, y1] = b.type === 'table' && p.tables[b.table] ? p.tables[b.table].bbox : b.bbox;
+    g.append(rect(x0, y0, x1, y1, `block ${b.type}`));
+    count[b.type] = (count[b.type] ?? 0) + 1;
+  }
+  $('boxes').replaceChildren(g);
+  pageSpace = { width: p.width, height: p.height };
+  fitBoxes();
+  const keys = KINDS.filter(([t]) => count[t]).map(([t, one, many]) => Object.assign(document.createElement('span'), { className: `key ${t}`, textContent: `${count[t]} ${count[t] === 1 ? one : many}` }));
+  $('legend').replaceChildren(...keys);
+  $('legend').hidden = !keys.length;
+  paintPager();
+}
+
+/** Previous and next page, for a PDF with more than one page read; not while a job runs (no page is drawn during a read). */
+function paintPager() {
+  const pdf = current?.pdf;
+  const n = pdf?.pages?.length ?? 0;
+  $('pager').hidden = n < 2;
+  if (n < 2) return;
+  $('prev').disabled = pending > 0 || pdf.index === 0;
+  $('next').disabled = pending > 0 || pdf.index >= n - 1;
+}
+
+function turnPage(step) {
+  const cur = current;
+  const i = (cur?.pdf?.index ?? 0) + step;
+  if (!cur?.pdf?.pages || i < 0 || i >= cur.pdf.pages.length) return;
+  enqueue(async () => {
+    if (cur !== current || !cur.pdf) return;
+    await drawPdfPage(cur, cur.pdf.pages[i].page);
+    cur.pdf.index = i;
+    framePage(cur);
+  }).catch((e) => addResultNote(`This page could not be drawn: ${e?.message ?? e}`));
+}
+
+/**
+ * On a narrow screen a PDF's page sits in the result, beside the time, so the page, the time and the top of the
+ * result fit one phone screen; otherwise the figure stays under the input. Returns whether the page is beside the time.
+ */
+function placeFigure() {
+  const fig = $('figure');
+  const side = narrow.matches && !!current?.pdf;
+  $('result').classList.toggle('with-page', side);
+  if (side && fig.parentElement !== $('result')) $('result').prepend(fig);
+  if (!side && fig.parentElement === $('result')) document.querySelector('.examples').after(fig);
+  return side;
+}
+
 function showResult() {
   $('result').hidden = false;
 }
 
 /** On a narrow screen, bring the image (or the result) to the top once the job has drawn everything. */
 function reveal() {
-  if (!window.matchMedia('(max-width: 960px)').matches || $('result').hidden) return;
-  requestAnimationFrame(() => ($('figure').hidden ? $('result') : $('figure')).scrollIntoView({ block: 'start' }));
+  if (!narrow.matches || $('result').hidden) return;
+  const top = $('figure').hidden || $('result').classList.contains('with-page') ? $('result') : $('figure');
+  requestAnimationFrame(() => top.scrollIntoView({ block: 'start' }));
 }
 
 function showTime(ms, detail) {
@@ -442,7 +668,10 @@ function showTime(ms, detail) {
   $('output').hidden = false;
   const t = $('took');
   const v = ms < 1000 ? `${Math.round(ms)}` : (ms / 1000).toFixed(ms < 10000 ? 2 : 1);
-  t.replaceChildren(document.createTextNode(`Read in ${v} `), Object.assign(document.createElement('span'), { className: 'unit', textContent: ms < 1000 ? 'ms' : 's' }));
+  // the number and its unit stay together (a narrow column puts them under "Read in")
+  const value = Object.assign(document.createElement('span'), { className: 'value' });
+  value.append(`${v} `, Object.assign(document.createElement('span'), { className: 'unit', textContent: ms < 1000 ? 'ms' : 's' }));
+  t.replaceChildren('Read in ', value);
   $('took-detail').textContent = detail;
 }
 
@@ -453,38 +682,52 @@ function addResultNote(text) {
   $('output').before(p);
 }
 
-/** The boxes layer takes the image's natural size as its coordinates and its shown size as its size. */
+/**
+ * The boxes layer takes the file's own pixels as its coordinates (an image's natural size; a PDF page's size in
+ * convert()'s pixels) and the shown size as its size.
+ */
 function fitBoxes() {
-  const img = $('image');
+  const onPage = !$('page').hidden;
+  const shown = onPage ? $('page') : $('image');
+  const space = onPage ? pageSpace : { width: shown.naturalWidth, height: shown.naturalHeight };
   const svg = $('boxes');
-  if (!img.naturalWidth) return;
-  svg.setAttribute('viewBox', `0 0 ${img.naturalWidth} ${img.naturalHeight}`);
+  if (!space?.width) return;
+  svg.setAttribute('viewBox', `0 0 ${space.width} ${space.height}`);
   svg.setAttribute('preserveAspectRatio', 'none');
-  svg.style.width = `${img.clientWidth}px`;
-  svg.style.height = `${img.clientHeight}px`;
+  svg.style.width = `${shown.clientWidth}px`;
+  svg.style.height = `${shown.clientHeight}px`;
 }
 let resizeWatch = null;
+function watchSize() {
+  if (resizeWatch) return;
+  resizeWatch = new ResizeObserver(fitBoxes);
+  resizeWatch.observe($('image'));
+  resizeWatch.observe($('page'));
+}
+
+function rect(x0, y0, x1, y1, cls) {
+  const r = document.createElementNS(SVG, 'rect');
+  r.setAttribute('x', x0);
+  r.setAttribute('y', y0);
+  r.setAttribute('width', Math.max(1, x1 - x0));
+  r.setAttribute('height', Math.max(1, y1 - y0));
+  r.setAttribute('rx', 2);
+  if (cls) r.setAttribute('class', cls);
+  return r;
+}
 
 function drawBoxes(lines) {
   const img = $('image');
   const svg = $('boxes');
   svg.replaceChildren(...lines.map((l, i) => {
-    const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     const b = l.bbox;
-    r.setAttribute('x', b.x0);
-    r.setAttribute('y', b.y0);
-    r.setAttribute('width', Math.max(1, b.x1 - b.x0));
-    r.setAttribute('height', Math.max(1, b.y1 - b.y0));
-    r.setAttribute('rx', 2);
+    const r = rect(b.x0, b.y0, b.x1, b.y1);
     r.dataset.i = i;
     return r;
   }));
   if (img.complete) fitBoxes();
   img.onload = fitBoxes;
-  if (!resizeWatch) {
-    resizeWatch = new ResizeObserver(fitBoxes);
-    resizeWatch.observe(img);
-  }
+  watchSize();
 }
 
 function selectTab(tab) {

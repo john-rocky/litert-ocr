@@ -1,9 +1,10 @@
 // coi-serviceworker 0.1.7 (npm coi-serviceworker@0.1.7, https://github.com/gzuidhof/coi-serviceworker). It sets
 // Cross-Origin-Opener-Policy / Cross-Origin-Embedder-Policy from a service worker, so that WebAssembly threads work on
 // a host that cannot send those headers (GitHub Pages). One addition for this page, marked [litert-ocr demo]: the
-// service worker keeps a copy of the page's own files and of the pinned litert-ocr module, and answers from it when
-// the network is gone (the library keeps the model files in its own cache). To share it, the original's
-// header-setting code is moved into a function, withHeaders. Everything else is the 0.1.7 file as published.
+// service worker keeps a copy of the page's own files, of the pinned litert-ocr module and of the pdf.js files the
+// library pins (the page draws PDF pages with them), and answers from it when the network is gone (the library keeps
+// the model files in its own cache). To share it, the original's header-setting code is moved into a function,
+// withHeaders. Everything else is the 0.1.7 file as published.
 //
 // MIT License
 //
@@ -50,9 +51,10 @@ if (typeof window === 'undefined') {
         }
     });
 
-    // [litert-ocr demo] the files kept for offline visits: this origin's GET requests and the pinned library module
+    // [litert-ocr demo] the files kept for offline visits: this origin's GET requests, the pinned library module and
+    // the pdf.js version it pins (litert-ocr 0.1.0: pdfjs-dist 6.4.299)
     const OFFLINE_CACHE = "litert-ocr-demo-page";
-    const keep = (r) => r.method === "GET" && (new URL(r.url).origin === self.location.origin || r.url === "https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm");
+    const keep = (r) => r.method === "GET" && (new URL(r.url).origin === self.location.origin || r.url === "https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm" || r.url.startsWith("https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/"));
 
     function withHeaders(response) {
         const newHeaders = new Headers(response.headers);
