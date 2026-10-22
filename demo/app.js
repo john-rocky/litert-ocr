@@ -499,6 +499,8 @@ function finishNotes(job) {
 
 function showFile(file, job) {
   $('result').hidden = true;
+  // the previous file's result goes too: on a narrow screen a PDF's page shows in the result card while it is read
+  $('output').hidden = true;
   $('error').hidden = true;
   $('password-form').hidden = true;
   $('took').textContent = '';

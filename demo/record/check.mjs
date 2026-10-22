@@ -73,6 +73,22 @@ async function pick(page, path) {
   await chooser.setFiles(path);
   return waitRun(page, n + 1);
 }
+/** The same, looking at the screen while the file is read (a PDF once its page is drawn): the previous file's result. */
+async function pickWatching(page, path) {
+  const n = await runCount(page);
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#pick-label')]);
+  await chooser.setFiles(path);
+  const during = await (await page.waitForFunction((k) => {
+    const j = window.demoRuns[k];
+    if (!j) return null;
+    if (j.done) return { done: true };
+    if (j.kind === undefined || (j.kind === 'pdf' && j.pdfPage === undefined)) return null;
+    const vis = (id) => !document.getElementById(id).hidden;
+    return { done: false, result: vis('result'), output: vis('output'), error: vis('error'), took: document.getElementById('took').textContent };
+  }, n, { timeout: 240000 })).jsonValue();
+  return { job: await waitRun(page, n + 1), during };
+}
+const previousHidden = (d) => !d.done && !(d.result && (d.output || d.error)) && !d.took;
 /** The Markdown tab of an image: convert() runs when it is first opened. */
 async function openMarkdown(page) {
   await page.click('.tab[data-tab="md"]');
@@ -167,8 +183,15 @@ await page.screenshot({ path: join(OUT, 'ready.png') });
 
 // the examples through the page
 const pageOut = {};
-for (const ex of EXAMPLES) {
-  let job = await pick(page, join(DEMO, 'examples', ex.file));
+for (const [i, ex] of EXAMPLES.entries()) {
+  let job;
+  if (i === 0) job = await pick(page, join(DEMO, 'examples', ex.file));
+  else {
+    // a file after another one: while it is read, nothing of the previous file's result is on the screen
+    const w = await pickWatching(page, join(DEMO, 'examples', ex.file));
+    job = w.job;
+    check(`while ${ex.file} is read, the previous file's result is not shown`, previousHidden(w.during), w.during);
+  }
   if (ex.kind === 'image' && !job.error) job = await openMarkdown(page);
   pageOut[ex.file] = job;
   record(`example ${ex.file}`, job, { visible: await visibleText(page) });
@@ -344,7 +367,8 @@ if (PHONE && BROWSER === 'chrome') {
     checkFigure(`${tag}: receipt.jpg`, j, await figureState(p3));
     await p3.screenshot({ path: join(OUT, `${tag}-receipt.jpg.png`) });
     await p3.evaluate(() => window.scrollTo(0, 0));
-    const k = await pick(p3, join(DEMO, 'examples/inventory-scan.pdf'));
+    const { job: k, during } = await pickWatching(p3, join(DEMO, 'examples/inventory-scan.pdf'));
+    check(`${tag}: while the PDF is read after the photo, the photo's result is not shown (the page beside it)`, previousHidden(during), during);
     await settle(p3);
     checkFigure(`${tag}: inventory-scan.pdf`, k, await figureState(p3));
     const m = await p3.evaluate(() => {
