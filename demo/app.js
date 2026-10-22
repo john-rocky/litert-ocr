@@ -42,6 +42,7 @@ boot().catch((e) => {
 });
 
 async function boot() {
+  showFramed();
   setStatus('busy', 'Starting…');
   const isolated = await isolation();
   demoState.isolated = isolated;
@@ -66,6 +67,17 @@ async function boot() {
   // the first jobs in the line: a file given meanwhile waits for them instead of sharing the CPU with them
   converterReady = enqueue(startConverter);
   enqueue(startPdfPages);
+}
+
+/**
+ * Inside a frame (as on the Space's page on huggingface.co) the page offers its own address, opened on its own: in a
+ * frame Chrome on a Galaxy S26 read more slowly and Safari on an iPhone could not keep the model files (2026-10-22).
+ */
+function showFramed() {
+  if (window.self === window.top) return;
+  const a = Object.assign(document.createElement('a'), { href: location.origin + location.pathname, target: '_blank', rel: 'noopener', textContent: 'Open this page on its own' });
+  $('framed').replaceChildren(a, ': in a frame like this one, Chrome on a Galaxy S26 read more slowly and Safari on an iPhone could not keep the model files.');
+  $('framed').hidden = false;
 }
 
 /**
@@ -630,12 +642,15 @@ function turnPage(step) {
   const cur = current;
   const i = (cur?.pdf?.index ?? 0) + step;
   if (!cur?.pdf?.pages || i < 0 || i >= cur.pdf.pages.length) return;
+  const n = cur.pdf.pages[i].page;
   enqueue(async () => {
     if (cur !== current || !cur.pdf) return;
-    await drawPdfPage(cur, cur.pdf.pages[i].page);
+    await drawPdfPage(cur, n);
     cur.pdf.index = i;
     framePage(cur);
-  }).catch((e) => addResultNote(`This page could not be drawn: ${e?.message ?? e}`));
+  }).catch((e) => {
+    if (cur === current) addResultNote(`Page ${n} could not be drawn: ${e?.message ?? e}`);
+  });
 }
 
 /**

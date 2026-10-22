@@ -38,6 +38,7 @@ code { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 .status.failed .dot { background: var(--bad); }
 @keyframes pulse { 50% { opacity: 0.3; } }
 .detail { margin: 2px 0 0 17px; color: var(--muted); font-size: 13px; min-height: 1em; }
+.framed { margin: 6px 0 0 17px; font-size: 13px; }
 .notes { margin: 6px 0 0 17px; padding: 0; list-style: none; font-size: 13px; color: var(--warn); }
 .notes li { margin: 2px 0; }
 
