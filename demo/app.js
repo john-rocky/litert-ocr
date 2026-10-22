@@ -71,12 +71,12 @@ async function boot() {
 
 /**
  * Inside a frame (as on the Space's page on huggingface.co) the page offers its own address, opened on its own: in a
- * frame Chrome on a Galaxy S26 read more slowly and Safari on an iPhone could not keep the model files (2026-10-22).
+ * frame Chrome on a Galaxy S26 read more slowly (2026-10-22).
  */
 function showFramed() {
   if (window.self === window.top) return;
   const a = Object.assign(document.createElement('a'), { href: location.origin + location.pathname, target: '_blank', rel: 'noopener', textContent: 'Open this page on its own' });
-  $('framed').replaceChildren(a, ': in a frame like this one, Chrome on a Galaxy S26 read more slowly and Safari on an iPhone could not keep the model files.');
+  $('framed').replaceChildren(a, ': in a frame like this one, Chrome on a Galaxy S26 read more slowly.');
   $('framed').hidden = false;
 }
 
