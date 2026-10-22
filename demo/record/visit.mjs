@@ -5,7 +5,7 @@
 //     service worker's own request is counted), up to that result and up to the end of the downloads in the background
 //   - the hosts the page contacted
 //   - offline (--offline): Chrome started again on the same profile with every host name unresolvable and this
-//     server stopped, the page opened, a photo and a PDF read
+//     server stopped, the page opened, a photo and a PDF read, and whether the PDF's page is shown with its frames
 // Each run is a new empty profile; the server (record/serve.mjs, the GitHub Pages way) is started here.
 // usage: node demo/record/visit.mjs [--runs 3] [--file examples/receipt.jpg] [--offline] [--out DIR] [--chrome PATH] [--port 8090]
 //        [--url URL] (a page served elsewhere instead of this server; no --offline then)
@@ -220,6 +220,14 @@ if (OFFLINE && keepProfile && !URL_GIVEN) {
     const pdf = await handFile(B.cdp, tab.sessionId, PDF);
     out.photo = { ms: photo?.ms, lines: photo?.lines?.length, error: photo?.error ?? null };
     out.pdf = { ms: pdf?.ms, lines: pdf?.lines?.length, error: pdf?.error ?? null, pages: pdf?.pages ?? null };
+    // the PDF's page in the figure: drawn (dark pixels on the canvas) and one frame per block of convert()
+    out.pdfPage = await evaluate(B.cdp, tab.sessionId, `(() => {
+      const fig = document.getElementById('figure'), cv = document.getElementById('page');
+      let ink = 0;
+      if (!fig.hidden && !cv.hidden && cv.width) { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; for (let i = 0; i < d.length; i += 16) if (d[i] < 128 && d[i + 1] < 128 && d[i + 2] < 128) ink++; }
+      const job = window.demoRuns.at(-1);
+      return { shown: !fig.hidden && !cv.hidden, ink, frames: document.querySelectorAll('#boxes rect').length, blocks: job.json ? JSON.parse(job.json).pages[0].blocks.length : null, drawn: job.pdfPage ?? null, pdfjs: window.demoState.pdfPages };
+    })()`);
     out.converter = await evaluate(B.cdp, tab.sessionId, 'window.demoState.converter');
   } else {
     out.text = await evaluate(B.cdp, tab.sessionId, 'document.body?.innerText?.slice(0, 400)');
@@ -227,7 +235,7 @@ if (OFFLINE && keepProfile && !URL_GIVEN) {
   out.bytes = B.net.bytes;
   out.failedRequests = B.net.failed.slice(0, 20);
   report.offline = out;
-  console.log(`offline: opened ${out.opened}, photo ${JSON.stringify(out.photo)}, pdf ${JSON.stringify(out.pdf)}`);
+  console.log(`offline: opened ${out.opened}, photo ${JSON.stringify(out.photo)}, pdf ${JSON.stringify(out.pdf)}, pdf page ${JSON.stringify(out.pdfPage)}`);
   await B.cdp.send('Browser.close').catch(() => {});
   await sleep(1500);
   B.proc.kill('SIGTERM');
