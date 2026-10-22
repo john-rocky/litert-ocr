@@ -595,7 +595,7 @@ function closePdf() {
   pdfOpen = null;
 }
 
-/** Frames of the blocks convert() found on the page shown, coloured by block type, and the legend under the page. */
+/** Frames of the blocks convert() found on the page shown, colored by block type, and the legend under the page. */
 function framePage(cur) {
   const p = cur.pdf.pages[cur.pdf.index];
   const g = document.createElementNS(SVG, 'g');
