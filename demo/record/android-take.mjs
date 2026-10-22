@@ -171,7 +171,8 @@ async function until(expr, ms, step = 100) {
     await sleep(step);
   }
 }
-const readyExpr = `window.demoState?.phase === 'ready' && ['ready', 'failed'].includes(window.demoState?.converter) ? window.demoState : (window.demoState?.phase === 'failed' ? { failed: window.demoState } : null)`;
+// Ready, the converter started and (a page that draws PDF pages) its pdf.js loaded: nothing the take needs is still on the network
+const readyExpr = `window.demoState?.phase === 'ready' && ['ready', 'failed'].includes(window.demoState?.converter) && (window.demoState.pdfPages === undefined || ['ready', 'failed'].includes(window.demoState.pdfPages)) ? window.demoState : (window.demoState?.phase === 'failed' ? { failed: window.demoState } : null)`;
 const runsLength = () => evaluate('window.demoRuns.length');
 const waitRun = (n, ms = 240000) => until(`(() => { const j = window.demoRuns[${n}]; return j && j.done ? j : null; })()`, ms);
 /** A 1 px element in the page's corner changes its opacity for `ms` (CSS, nothing else moves): the recorder keeps writing frames. */
@@ -287,7 +288,7 @@ async function main() {
   run.chrome = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json()).Browser;
   let st = await until(readyExpr, 300000);
   if (!st || st.failed) throw new Error(`the page did not get ready: ${JSON.stringify(st ?? (await evaluate('window.demoState')))}`);
-  run.visit1 = { info: st.info, isolated: st.isolated, bytes: st.bytes, notes: st.notes, converterMs: st.converterMs, tab: t.id };
+  run.visit1 = { info: st.info, isolated: st.isolated, bytes: st.bytes, notes: st.notes, converterMs: st.converterMs, pdfPages: st.pdfPages ?? null, tab: t.id };
   log('visit 1 ready', { threads: st.info.threads, detector: st.info.detector, network: st.bytes.network });
 
   // airplane mode, then the page again from the caches
