@@ -1,6 +1,6 @@
 # Demo: photo, scan or PDF to text, Markdown and JSON
 
-A page that reads your own files with litert-ocr in the browser tab: https://john-rocky.github.io/litert-ocr/
+A page that reads your own files with litert-ocr in the browser tab: https://huggingface.co/spaces/mlboydaisuke/litert-ocr (a Hugging Face Space, which sends the isolation headers itself), and the same page on GitHub Pages: https://john-rocky.github.io/litert-ocr/
 
 - **Photos and screenshots**: every text line, framed on the image, in reading order (`worker.recognize()`).
 - **PDFs and scans**: Markdown with headings, lists and tables (`convert()`). A page with a text layer is read from it; a scanned page is read by OCR.

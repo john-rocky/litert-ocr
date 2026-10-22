@@ -6,7 +6,7 @@ In the browser the text detector runs on WebGPU when the browser has it and the 
 
 It also turns PDFs, scans and photos into Markdown with tables, JSON or text ([`convert`](#documents--markdown)), fills a JSON Schema from a document with an on-device language model in the browser ([`extract`](#extract-json)), and runs from the command line ([`npx litert-ocr`](#cli)) and as an MCP server for coding agents ([`npx litert-ocr mcp`](#mcp)).
 
-Try it on your own photo, scan or PDF: [the demo page](https://john-rocky.github.io/litert-ocr/) reads it in the browser tab and shows the text with its line boxes, Markdown and JSON ([`demo/`](demo)).
+Try it on your own photo, scan or PDF: [the demo](https://huggingface.co/spaces/mlboydaisuke/litert-ocr) (a Hugging Face Space; the same page is on [GitHub Pages](https://john-rocky.github.io/litert-ocr/)) reads it in the browser tab and shows the text with its line boxes, Markdown and JSON ([`demo/`](demo)).
 
 Status: v0. Tested in Node.js 24, Deno 2.9 and Bun 1.4, and in these browsers (2026-10-20; 12 images: 6 English and Japanese screenshots, 3 photos of English text, 2 receipts and a 4032 x 3024 photo with Japanese text; time = from handing over the image file to the text, with the model already loaded; median of the 10 images that needed no extra model download):
 
