@@ -378,10 +378,12 @@ async function main() {
     const pick = await reachFile(kind, name, `take-${kind}`, true);
     const tapFile = now();
     if (!pick.ok) throw new Error(`take ${kind}: ${pick.why}`);
+    // the screen while the file is read (a PDF once its page is drawn): whatever else of the page is visible
+    const during = await until(`(() => { const j = window.demoRuns[${n}]; if (!j || j.kind === undefined || (j.kind === 'pdf' && j.pdfPage === undefined)) return null; if (j.done) return { done: true }; const vis = (id) => !document.getElementById(id).hidden; return { done: false, result: vis('result'), output: vis('output'), error: vis('error'), took: document.getElementById('took').textContent, at: Date.now() }; })()`, 30000, 20);
     const job = await waitRun(n);
     await keepFrames(hold + 1000);
     const shown = await evaluate(shownExpr);
-    run.screens.push({ kind, file: name, tapButton, tapFile, startedAt: job?.startedAt, endedAt: job?.endedAt, screenMs: job?.ms, lines: job?.lines ?? null, markdown: job?.markdown ?? null, text: job?.text ?? null, error: job?.error ?? null, pdfPage: job?.pdfPage ?? null, blocks: job?.json ? JSON.parse(job.json).pages.map((p) => p.blocks.length) : null, shown, steps: pick.steps, rest: rest() });
+    run.screens.push({ kind, file: name, tapButton, tapFile, startedAt: job?.startedAt, endedAt: job?.endedAt, screenMs: job?.ms, lines: job?.lines ?? null, markdown: job?.markdown ?? null, text: job?.text ?? null, error: job?.error ?? null, pdfPage: job?.pdfPage ?? null, blocks: job?.json ? JSON.parse(job.json).pages.map((p) => p.blocks.length) : null, during, shown, steps: pick.steps, rest: rest() });
     log(`result ${kind}`, { screenMs: job?.ms, lines: job?.lines?.length, shown });
     await sleep(hold);
   }
