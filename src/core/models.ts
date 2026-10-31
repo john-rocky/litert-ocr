@@ -39,7 +39,7 @@ export const VOCAB_SIZE = 18710;
  * It is on the Hub from the commit below on. The files in MODEL_FILES stay at MODEL_REVISION when their bytes did not
  * change: the cache keys files by URL, so a visitor who has them does not download them again.
  */
-export const REC320_WEBGPU_SOURCE: { repo: string; revision: string } | null = { repo: MODEL_REPO, revision: '<commit>' };
+export const REC320_WEBGPU_SOURCE: { repo: string; revision: string } | null = { repo: MODEL_REPO, revision: '63ecbbec38c1cf8338ff3f0e6bf967caf7d2d25d' };
 export const REC320_WEBGPU_FILE: PinnedFile = { file: 'ppocrv6_small_rec_320_fp32_webgpu.tflite', bytes: 21517364, sha256: '3b4e228232967986fc715c5501f0731b70c6d17fd64d023dc35dee4f81d10b90' };
 export const REC320_WEBGPU_BASE: string | null = REC320_WEBGPU_SOURCE ? `https://huggingface.co/${(REC320_WEBGPU_SOURCE as { repo: string }).repo}/resolve/${(REC320_WEBGPU_SOURCE as { revision: string }).revision}/` : null;
 
