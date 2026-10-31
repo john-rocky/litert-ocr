@@ -110,7 +110,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     const { litert, threads } = await platform.loadRuntime(o, io);
     runtime = { litert, threads };
     const want = o.recognizer ?? 'auto';
-    // the 320-wide file: the published one, or its WebGPU form where the recognizer may run on WebGPU (once published)
+    // the 320-wide file: MODEL_FILES.rec320, or its WebGPU form where the recognizer may run on WebGPU
     const gpuRec320 = REC320_WEBGPU_BASE !== null && !o.modelFiles.rec320 && (want === 'webgpu' || (want === 'auto' && threads === 1 && webGpuUsable(litert)));
     const specOf = (role: ModelRole): FileSpec => {
       const over = o.modelFiles[role];

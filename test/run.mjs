@@ -5,7 +5,7 @@
 //   browser modes, chrome = the two Chrome modes, webkit = WebKit only)
 // Logs go to $LOG_DIR (default test/out/). Optional: $LITERT_OCR_LAYOUT_BASE = a directory with the layout model
 // files (not published yet), $LITERT_OCR_TEST_LLM = the Gemma 4 E2B web model file for the extract() case,
-// $LITERT_OCR_TEST_REC320 (+ _SHA256) = the WebGPU form of the 320-wide recognizer (not published yet) for the
+// $LITERT_OCR_TEST_REC320 (+ _SHA256) = another WebGPU form of the 320-wide recognizer (default: the pinned one) for the
 // recognizer cases.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

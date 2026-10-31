@@ -34,12 +34,12 @@ export const VOCAB_SIZE = 18710;
 /**
  * The 320-wide recognizer rewritten for WebGPU: its attention product (q·kᵀ, 40 columns) is computed as two halves
  * of 20 columns, which avoids the misreads of LiteRT issue #9661 on WebGPU; on WebAssembly it computes the same
- * numbers as the published file (each output is the same dot product). recognizer 'auto' moves recognition to
- * WebGPU with it where WebAssembly runs on 1 thread (Safari). Not on Hugging Face yet (upload pending): while
- * REC320_WEBGPU_SOURCE is null, 'auto' keeps the recognizer on WebAssembly unless `modelFiles.rec320` gives this file.
- * Publishing = filling this one line with the Hub repository and its commit; the file keeps its name, size and sha256.
+ * numbers as ppocrv6_small_rec_320_fp32.tflite (each output is the same dot product). recognizer 'auto' moves
+ * recognition to WebGPU with it where WebAssembly runs on 1 thread (Safari), after a check at start.
+ * It is on the Hub from the commit below on. The files in MODEL_FILES stay at MODEL_REVISION when their bytes did not
+ * change: the cache keys files by URL, so a visitor who has them does not download them again.
  */
-export const REC320_WEBGPU_SOURCE: { repo: string; revision: string } | null = null; // upload pending
+export const REC320_WEBGPU_SOURCE: { repo: string; revision: string } | null = { repo: MODEL_REPO, revision: '<commit>' };
 export const REC320_WEBGPU_FILE: PinnedFile = { file: 'ppocrv6_small_rec_320_fp32_webgpu.tflite', bytes: 21517364, sha256: '3b4e228232967986fc715c5501f0731b70c6d17fd64d023dc35dee4f81d10b90' };
 export const REC320_WEBGPU_BASE: string | null = REC320_WEBGPU_SOURCE ? `https://huggingface.co/${(REC320_WEBGPU_SOURCE as { repo: string }).repo}/resolve/${(REC320_WEBGPU_SOURCE as { revision: string }).revision}/` : null;
 

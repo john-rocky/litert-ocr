@@ -64,7 +64,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "node scripts/check-pins.mjs && npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node test/run.mjs",
     "test:node": "node test/run.mjs node",

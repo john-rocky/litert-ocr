@@ -29,7 +29,7 @@ export interface EngineInit {
    * only when rec320Safe, no check.
    */
   recognizer?: 'auto' | 'wasm' | 'webgpu';
-  /** The 320-wide file is one that WebGPU reads correctly (not the published file, which misreads: LiteRT issue #9661). */
+  /** The 320-wide file is one that WebGPU reads correctly (not ppocrv6_small_rec_320_fp32.tflite, which misreads there: LiteRT issue #9661). */
   rec320Safe?: boolean;
   /** Tests only: the check sees one output step changed on WebGPU. */
   checkHook?: 'mismatch';
@@ -181,7 +181,7 @@ export class Engine {
     if (numThreads > 1) return wasmOnly(`WebAssembly runs on ${numThreads} threads here, so the recognizers run on WebAssembly.`);
     if (!this.gpuUsable) return wasmOnly('WebAssembly runs on 1 thread here and there is no WebGPU device, so the recognizers run on WebAssembly.');
     if (!this.init.rec320Safe) {
-      return wasmOnly('WebAssembly runs on 1 thread here, but the WebGPU form of the 320-wide recognizer is not published yet (modelInfo.rec320WebGpu; pass it as modelFiles.rec320), so the recognizers run on WebAssembly.');
+      return wasmOnly('WebAssembly runs on 1 thread here, but the WebGPU form of the 320-wide recognizer was not loaded (modelInfo.rec320WebGpu; it can be given as modelFiles.rec320), so the recognizers run on WebAssembly.');
     }
     const r = await this.checkWidth(320, this.init.rec320);
     if (!r.check) {

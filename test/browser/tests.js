@@ -271,13 +271,14 @@ window.tests = {
     return { ok: classicResult === 'importScripts worked' && moduleResult !== 'importScripts worked', module: moduleResult, classic: classicResult };
   },
 
-  // recognizer: 'webgpu' with a 320 file that has no #9661 fault (given by the runner): every fixture must read
-  // the same as the WebAssembly recognizer; without that file the 320 recognizer must stay on WebAssembly.
-  async webgpuRecognizer({ rec320Url, rec320Sha, mode }) {
-    if (!rec320Url) return { ok: true, skipped: 'set LITERT_OCR_TEST_REC320 (and _SHA256) to a rewritten 320 file to run this case' };
+  // recognizer: 'webgpu' with a 320 file that has no #9661 fault (the pinned WebGPU form, or one given by the runner):
+  // every fixture must read the same as the WebAssembly recognizer. Without that file (not published, none given) the
+  // 320 recognizer must stay on WebAssembly.
+  async webgpuRecognizer({ rec320Url, rec320Sha, mode, published }) {
+    if (!rec320Url && !published) return { ok: true, skipped: 'the WebGPU form of the 320 file is not published: set LITERT_OCR_TEST_REC320 (and _SHA256) to run this case' };
     const exp = await fixtures();
     const wasm = await worker();
-    const gpu = await ocr.createWorker('eng', 1, local({ recognizer: 'webgpu', modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } }));
+    const gpu = await ocr.createWorker('eng', 1, local({ recognizer: 'webgpu', ...(rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {}) }));
     const out = {};
     let same = true;
     for (const file of Object.keys(exp)) {
@@ -298,12 +299,12 @@ window.tests = {
     const plainInfo = plain.info;
     await plain.terminate();
     const want = mode === 'wasm' ? 'wasm' : 'webgpu';
-    return { ok: same && info.recognizers['320'] === want && info.recognizers['640'] === want && plainInfo.recognizers['320'] === 'wasm', info, plainInfo, out };
+    return { ok: same && info.recognizers['320'] === want && info.recognizers['640'] === want && plainInfo.recognizers['320'] === (published ? want : 'wasm'), info, plainInfo, out };
   },
 
   // recognizer 'auto' (the default). The runner names what this browser and page must choose (`expect`):
-  //   'webgpu'      WebAssembly has 1 thread, a WebGPU device exists and the WebGPU form of the 320 file is given
-  //                 (rec320Url): the check line reads the same, every fixture and a long line (640 / 960) read the same
+  //   'webgpu'      WebAssembly has 1 thread, a WebGPU device exists and the WebGPU form of the 320 file is pinned or
+  //                 given (rec320Url): the check line reads the same, every fixture and a long line (640 / 960) read the same
   //                 text as recognizer 'wasm'
   //   'threads'     WebAssembly has several threads: WebAssembly, no check
   //   'nogpu'       1 thread, no WebGPU device: WebAssembly, no check
@@ -314,7 +315,7 @@ window.tests = {
     const auto = await ocr.createWorker('eng', 1, local({ ...opts, logger: (m) => m.status === 'notice' && notices.push(m.message) }));
     const info = auto.info;
     const said = notices.filter((n) => n.startsWith('Recognizer on'));
-    const reasonOk = { webgpu: /read the check line exactly as WebAssembly/, threads: /runs on \d+ threads here/, nogpu: /no WebGPU device/, unpublished: /not published yet/ }[expect];
+    const reasonOk = { webgpu: /read the check line exactly as WebAssembly/, threads: /runs on \d+ threads here/, nogpu: /no WebGPU device/, unpublished: /was not loaded/ }[expect];
     let ok = said.length === 1 && reasonOk.test(info.recognizerReason) && said[0].includes(info.recognizerReason);
     const out = { expect, info, notice: said[0] ?? null };
     if (expect === 'webgpu') {
@@ -340,7 +341,7 @@ window.tests = {
   },
   // the check made to see a differing output (a test hook): the recognizer stays on WebAssembly and says why
   async recognizerAutoMismatch({ rec320Url, rec320Sha }) {
-    const w = await ocr.createWorker('eng', 1, local({ modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } }, _recognizerCheck: 'mismatch' }));
+    const w = await ocr.createWorker('eng', 1, local({ ...(rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {}), _recognizerCheck: 'mismatch' }));
     const info = w.info;
     const text = (await w.recognize(FIX + 'mobile.png')).data.text;
     await w.terminate();

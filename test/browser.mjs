@@ -8,13 +8,16 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, webkit } from 'playwright';
+import { modelInfo } from '../dist/node.js';
 import { startServer } from './server.mjs';
 
 const mode = process.argv[2] ?? 'webgpu';
 const outFile = process.argv[3];
 const WEBKIT = mode === 'webkit';
-// optional: the WebGPU form of the 320-wide recognizer (not published yet; README "Model and runtime files")
+// optional: another WebGPU form of the 320-wide recognizer, given as modelFiles.rec320 (README "Model and runtime
+// files"); without it the cases use the pinned one (modelInfo.rec320WebGpu, in .models/)
 const REC320 = process.env.LITERT_OCR_TEST_REC320;
+const PUBLISHED = modelInfo.rec320WebGpu.status === 'published';
 // optional: the layout model files (not published yet) and the LLM file of extract() (2.0 GB), served locally
 const LAYOUT = WEBKIT ? null : process.env.LITERT_OCR_LAYOUT_BASE;
 const LLM = process.env.LITERT_OCR_TEST_LLM;
@@ -107,9 +110,9 @@ try {
   for (const name of ['outputs', 'rectangle', 'whitelist', 'singleLine', 'bigImage', 'scheduler', 'oldRecognize', 'langs', 'logger']) await run(main.page, name);
   for (const name of ['failModel404', 'failSha256', 'failWasm404', 'failDecode', 'failType', 'failImage404', 'failRectangle', 'failTerminated', 'failErrorHandler', 'failDetectAndOutputs', 'forcedWasm']) await run(main.page, name);
   await run(main.page, 'failCrossOriginFetch', { otherOrigin });
-  await run(main.page, 'webgpuRecognizer', REC320 ? { mode, ...rec320('coi') } : { mode });
+  await run(main.page, 'webgpuRecognizer', { mode, published: PUBLISHED, ...rec320('coi') });
   // recognizer 'auto' (the default): cross-origin isolated = threads in Chrome, 1 thread in WebKit
-  const autoCoi = WEBKIT ? (REC320 ? 'webgpu' : 'unpublished') : 'threads';
+  const autoCoi = WEBKIT ? (REC320 || PUBLISHED ? 'webgpu' : 'unpublished') : 'threads';
   await run(main.page, 'recognizerAuto', { ...rec320('coi'), expect: autoCoi }, 300000);
   if (autoCoi === 'webgpu') await run(main.page, 'recognizerAutoMismatch', rec320('coi'));
   if (WEBKIT) await run(main.page, 'recognizerAutoHub320', {}, 300000); // record only
@@ -169,7 +172,7 @@ try {
   const plain = await open('plain');
   await run(plain.page, 'noCoi');
   await run(plain.page, 'failTaintedImage', { otherOrigin });
-  const autoPlain = mode === 'wasm' ? 'nogpu' : REC320 ? 'webgpu' : 'unpublished';
+  const autoPlain = mode === 'wasm' ? 'nogpu' : REC320 || PUBLISHED ? 'webgpu' : 'unpublished';
   await run(plain.page, 'recognizerAuto', { ...rec320('plain'), expect: autoPlain }, 300000);
   if (autoPlain === 'webgpu') await run(plain.page, 'recognizerAutoMismatch', rec320('plain'));
   if (mode === 'webgpu') await run(plain.page, 'recognizerAutoHub320', {}, 300000); // record only

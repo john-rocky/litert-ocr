@@ -176,8 +176,9 @@ export interface WorkerOptions {
   errorHandler: (e: Error) => void;
   /**
    * Directory URL (browser) or URL / directory path (Node) holding the five model files under their
-   * Hub names. Default: Hugging Face, litert-community/PP-OCRv6-Small-LiteRT at a pinned commit. The
-   * files must match the pinned sha256 (a mirror of the same files).
+   * Hub names, and the WebGPU form of the 320-wide recognizer where the recognizer may run on WebGPU. Default: Hugging
+   * Face, litert-community/PP-OCRv6-Small-LiteRT at pinned commits (modelInfo). The files must match the pinned sha256
+   * (a mirror of the same files).
    */
   modelBase: string;
   /** Replace single model files: { rec320: { url, sha256 } } or { rec320: 'url' } (unverified). */
@@ -190,14 +191,14 @@ export interface WorkerOptions {
    * Where the recognizers run.
    * 'auto' (default): WebAssembly, except where WebAssembly runs on 1 thread (no relaxed SIMD, as in Safari, or a page
    *   that is not cross-origin isolated), a WebGPU device exists and the WebGPU form of the 320-wide recognizer is
-   *   available (modelInfo.rec320WebGpu: not published yet, so only when modelFiles.rec320 gives it). Then one fixed
+   *   available (modelInfo.rec320WebGpu, or a file given as modelFiles.rec320). Then one fixed
    *   text line is read on both WebAssembly and WebGPU at start, and on each wider recognizer when it first loads: the
    *   recognizer moves to WebGPU only if the outputs are the same. worker.info.recognizerReason says what was chosen
    *   and why; the logger gets the same as a notice.
    * 'wasm': always WebAssembly (the measured default where WebAssembly has threads).
-   * 'webgpu' (experimental): the 640 / 960 recognizers on WebGPU, the 320 one only with modelFiles.rec320 (the
-   *   published file misreads lines on WebGPU, LiteRT issue #9661); no check. Falls back to WebAssembly, with a
-   *   notice, where WebGPU fails.
+   * 'webgpu' (experimental): every recognizer on WebGPU, the 320 one with its WebGPU form (modelInfo.rec320WebGpu;
+   *   ppocrv6_small_rec_320_fp32.tflite misreads lines on WebGPU, LiteRT issue #9661); no check. Falls back to
+   *   WebAssembly, with a notice, where WebGPU fails.
    */
   recognizer: 'auto' | 'wasm' | 'webgpu';
   /**

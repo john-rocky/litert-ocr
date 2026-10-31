@@ -13,7 +13,8 @@ Components used at run time (not part of this package's source; installed or dow
 
   - LiteRT.js, npm @litertjs/core 2.5.3 (Apache License 2.0).
   - The PP-OCRv6-Small model files from Hugging Face litert-community/PP-OCRv6-Small-LiteRT, revision
-    a9b2febf2022fdd48ac2b5522115d6db3f8e214e (Apache License 2.0): converted from PaddlePaddle PP-OCRv6
+    a9b2febf2022fdd48ac2b5522115d6db3f8e214e, and for the WebGPU form of the 320-wide recognizer revision
+    <commit> (Apache License 2.0): converted from PaddlePaddle PP-OCRv6
     Small (Apache License 2.0); the repository's THIRD_PARTY_NOTICES.md lists the sources.
   - pngjs (MIT) and jpeg-js (BSD-3-Clause), which the Node.js build uses to decode images.
   - pdf.js, npm pdfjs-dist 6.4.299 (Apache License 2.0), which reads PDFs for convert(); the browser build loads it
