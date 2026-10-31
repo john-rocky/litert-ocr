@@ -55,7 +55,7 @@ export async function runMcp(o: McpOptions): Promise<void> {
   });
   const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 
-  const server = new McpServer({ name: 'litert-ocr', version: '0.1.0' });
+  const server = new McpServer({ name: 'litert-ocr', version: '0.2.0' });
 
   server.registerTool(
     'convert_to_markdown',

@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "litert-ocr": "file:../.pack/litert-ocr-0.1.0.tgz",
+    "litert-ocr": "file:../.pack/litert-ocr-0.2.0.tgz",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

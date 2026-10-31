@@ -33,7 +33,7 @@ From a CDN, with no build step:
 
 ```html
 <script type="module">
-  import { createWorker } from 'https://cdn.jsdelivr.net/npm/litert-ocr@0.1.0/+esm';
+  import { createWorker } from 'https://cdn.jsdelivr.net/npm/litert-ocr@0.2.0/+esm';
 </script>
 ```
 
