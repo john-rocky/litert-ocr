@@ -221,7 +221,7 @@ Measured with the default (2026-11-10, litert-ocr 0.2.1):
 | Chrome 156 on a Galaxy S26, the same 12 images | WebGPU / WebAssembly / WebGPU | 335 of 335 | 766 / 849 ms |
 | Chrome 156 on a Pixel 8a, the same 12 images | WebGPU / WebGPU / WebGPU | 335 of 335 | 2,982 / 3,843 ms |
 
-On the Galaxy S26 the 640-wide check failed all 7 times, so that width ran on WebAssembly there. A start with the files in the cache, the checks included, took about 0.8 s longer than with 0.2.0 on the two phones and no longer on the Mac. The check reads one line, so it is a coarse guard; the numbers behind this table are in [docs/recognizer-auto.md](https://github.com/john-rocky/litert-ocr/blob/main/docs/recognizer-auto.md).
+On the Galaxy S26 the 640-wide check failed all 7 times, so that width ran on WebAssembly there. The Galaxy S26's CPU clock was capped on every image, more in the later `'wasm'` run, so its two times per image are not a like-for-like comparison. A start with the files in the cache, the checks included, took about 0.8 s longer than with 0.2.0 on the two phones and no longer on the Mac. The check reads one line, so it is a coarse guard; the numbers behind this table are in [docs/recognizer-auto.md](https://github.com/john-rocky/litert-ocr/blob/main/docs/recognizer-auto.md).
 
 ## Offline
 
