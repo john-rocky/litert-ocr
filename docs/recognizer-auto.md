@@ -1,6 +1,6 @@
 # The 0.2.1 default recognizer, measured
 
-The numbers behind the table in the README section [Safari and WebGPU](https://github.com/john-rocky/litert-ocr#safari-and-webgpu): litert-ocr 0.2.1 with the default `recognizer: 'auto'`, 2026-11-10.
+The numbers behind the table in the section [Safari and WebGPU](speed-and-files.md#safari-and-webgpu): litert-ocr 0.2.1 with the default `recognizer: 'auto'`, 2026-11-10.
 
 | Browser | Recognizer (320 / 640 / 960) | Lines as with `recognizer: 'wasm'` | Time per image, default / `'wasm'` | Start, 0.2.1 / 0.2.0 |
 |---|---|---|---|---|

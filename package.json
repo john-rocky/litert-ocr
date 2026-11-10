@@ -54,6 +54,7 @@
   "files": [
     "dist",
     "README.md",
+    "docs/*.md",
     "AGENTS.md",
     "llms.txt",
     "LICENSE",
