@@ -64,9 +64,14 @@ export interface RuntimeIO {
   fetch(spec: FileSpec, status: string): Promise<Uint8Array>;
 }
 
+/** The part of worker.info that can change after start (a width loading and its check, a fallback). */
+export type RecState = Pick<WorkerInfo, 'detector' | 'recognizer' | 'recognizers' | 'recognizerReason' | 'recognizerCheck' | 'recognizerChecks'>;
+
 export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response) => void): (req: Request) => void {
   let engine: Engine | null = null;
   let info: WorkerInfo | null = null;
+  // set by init: where each recognizer runs now (sent with every result, so worker.info follows the later widths)
+  let recState: (() => RecState) | null = null;
   let chain: Promise<void> = Promise.resolve();
   let terminated = false;
   // kept from init for the layout model of convert(), which loads on the first page that needs it
@@ -110,8 +115,12 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     const { litert, threads } = await platform.loadRuntime(o, io);
     runtime = { litert, threads };
     const want = o.recognizer ?? 'auto';
+    // recognizer 'auto' checks WebGPU where a device exists and WebAssembly has 1 thread or backend is 'auto' (the
+    // browser default; Node.js, Deno and Bun default to 'wasm' and keep the recognizers on WebAssembly)
+    const autoMayGpu = want === 'auto' && webGpuUsable(litert) && (threads === 1 || o.backend !== 'wasm');
     // the 320-wide file: MODEL_FILES.rec320, or its WebGPU form where the recognizer may run on WebGPU
-    const gpuRec320 = REC320_WEBGPU_BASE !== null && !o.modelFiles.rec320 && (want === 'webgpu' || (want === 'auto' && threads === 1 && webGpuUsable(litert)));
+    let gpuRec320 = REC320_WEBGPU_BASE !== null && !o.modelFiles.rec320 && (want === 'webgpu' || autoMayGpu);
+    let rec320Note: string | undefined;
     const specOf = (role: ModelRole): FileSpec => {
       const over = o.modelFiles[role];
       const pinned = MODEL_FILES[role];
@@ -125,22 +134,38 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
     // Model files: one progress stream over the files loaded at start.
     const startRoles: ModelRole[] = o.eager ? ['characters', 'det', 'rec320', 'rec640', 'rec960'] : ['characters', 'det', 'rec320'];
     const specs = startRoles.map(specOf);
+    const firstSpec = startSpecs.length;
     startSpecs.push(...specs);
     const total = specs.reduce((s, f) => s + (f.bytes ?? 0), 0);
     const got: Partial<Record<ModelRole, Uint8Array>> = {};
     // in parallel; one progress stream over the bytes of all of them
     const loadedBy = new Array<number>(specs.length).fill(0);
+    const load = (spec: FileSpec, i: number) =>
+      fetchVerified(
+        spec,
+        makeCtx('modelBase', (loaded, _t, fromCache) => {
+          loadedBy[i] = loaded;
+          const sum = loadedBy.reduce((a, b) => a + b, 0);
+          send(id, { status: 'loading model', progress: total ? Math.min(1, sum / total) : 0, file: spec.name, loaded: sum, total, fromCache });
+        }),
+      );
     const bytes = await Promise.all(
-      specs.map((spec, i) =>
-        fetchVerified(
-          spec,
-          makeCtx('modelBase', (loaded, _t, fromCache) => {
-            loadedBy[i] = loaded;
-            const sum = loadedBy.reduce((a, b) => a + b, 0);
-            send(id, { status: 'loading model', progress: total ? Math.min(1, sum / total) : 0, file: spec.name, loaded: sum, total, fromCache });
-          }),
-        ),
-      ),
+      specs.map((spec, i) => {
+        const p = load(spec, i);
+        // recognizer 'auto': the WebGPU form is a choice, not a need. If it cannot be loaded (a model directory made
+        // for 0.1.0, offline with only the plain file cached), read with the plain 320 file on WebAssembly.
+        if (startRoles[i] !== 'rec320' || !gpuRec320 || want !== 'auto') return p;
+        return p.catch((e: unknown) => {
+          rec320Note = `${spec.name} could not be loaded: ${errText(e)}`;
+          notice(`The WebGPU form of the 320-wide recognizer (${spec.name}) could not be loaded (${errText(e)}); the recognizers run on WebAssembly with ${MODEL_FILES.rec320.file}.`, 'warn');
+          gpuRec320 = false;
+          const plain = specOf('rec320');
+          specs[i] = plain;
+          startSpecs[firstSpec + i] = plain;
+          loadedBy[i] = 0;
+          return load(plain, i);
+        });
+      }),
     );
     startRoles.forEach((role, i) => { got[role] = bytes[i]!; });
     const cached = async (s: FileSpec): Promise<boolean> => {
@@ -173,6 +198,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       backend: o.backend,
       recognizer: want,
       rec320Safe: o.modelFiles.rec320 !== undefined || gpuRec320,
+      ...(rec320Note ? { rec320Note } : {}),
       ...(o.recognizerCheck ? { checkHook: o.recognizerCheck } : {}),
       notice,
       progress: (p, step) => send(id, { status: 'initializing model', progress: p, message: step }),
@@ -183,16 +209,27 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       await engine.recognizer(640);
       await engine.recognizer(960);
     }
-    const rb = engine.recBackends;
-    const planned = (want === 'webgpu' && engine.gpuUsable) || (want === 'auto' && engine.autoGpu) ? 'webgpu' : 'wasm';
-    const recognizers = { '320': rb[320], '640': o.eager ? rb[640] : planned, '960': o.eager ? rb[960] : planned } as const;
-    const kinds = new Set(Object.values(recognizers));
+    recState = () => {
+      const e = engine!;
+      const rb = e.recBackends;
+      // a width not loaded yet: where it will go (recognizer 'auto': WebGPU if its own check passes when it loads)
+      const planned = (want === 'webgpu' && e.gpuUsable) || (want === 'auto' && e.autoGpu) ? 'webgpu' : 'wasm';
+      const at = (w: 640 | 960) => (e.hasLoaded(w) ? rb[w] : planned);
+      const recognizers = { '320': rb[320], '640': at(640), '960': at(960) } as const;
+      const kinds = new Set(Object.values(recognizers));
+      return {
+        detector: e.detector,
+        recognizer: kinds.size > 1 ? 'mixed' : [...kinds][0]!,
+        recognizers,
+        recognizerReason: e.recognizerReason,
+        recognizerCheck: e.recognizerCheck,
+        recognizerChecks: { '320': e.checks[320], '640': e.checks[640], '960': e.checks[960] },
+      };
+    };
+    const now = recState();
+    const recognizers = now.recognizers;
     info = {
-      detector: engine.detector,
-      recognizer: kinds.size > 1 ? 'mixed' : [...kinds][0]!,
-      recognizers,
-      recognizerReason: engine.recognizerReason,
-      recognizerCheck: engine.recognizerCheck,
+      ...now,
       threads,
       runtime: `LiteRT.js ${LITERT_VERSION}`,
       model: `${MODEL_NAME} @${MODEL_REVISION.slice(0, 7)}`,
@@ -278,7 +315,7 @@ export function createHandler<Src>(platform: Platform<Src>, post: (msg: Response
       });
       const page = buildPage(r.lines, req.output, prepared.size, prepared.map, `${PKG_NAME} ${PKG_VERSION} (${info.model}, ${info.runtime})`);
       send(id, { status: 'recognizing text', progress: 1 });
-      return { page, timing: { totalMs: performance.now() - t0, detMs: r.detMs, recMs: r.recMs }, detector: engine.detector };
+      return { page, timing: { totalMs: performance.now() - t0, detMs: r.detMs, recMs: r.recMs }, detector: engine.detector, state: recState?.() ?? null };
     } finally {
       prepared?.release();
       decoded.release();

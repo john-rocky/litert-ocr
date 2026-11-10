@@ -57,7 +57,7 @@ async function readPdfExample(url) {
   const t0 = Date.now();
   try {
     const context = await browser.newContext();
-    await context.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.0/+esm', (route) =>
+    await context.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.1/+esm', (route) =>
       route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }, body: readFileSync(join(ROOT, 'dist/index.js')) }));
     const page = await context.newPage();
     const lines = [];
@@ -120,7 +120,7 @@ try {
   if (which.includes('html')) {
     // the CDN URL of the unpublished package is answered with dist/index.js; everything else is real
     await readOne(`http://127.0.0.1:${S.port}/coi/examples/html/index.html`, 'html (CDN)', (ctx) =>
-      ctx.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.0/+esm', (route) =>
+      ctx.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.1/+esm', (route) =>
         route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }, body: readFileSync(join(ROOT, 'dist/index.js')) })),
     );
   }

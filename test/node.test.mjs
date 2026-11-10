@@ -55,10 +55,12 @@ describe('node: reading', () => {
     assert.equal(worker.info.platform, process.versions.bun ? 'bun' : globalThis.Deno ? 'deno' : 'node');
     assert.equal(worker.info.detector, 'wasm');
     assert.ok(worker.info.threads >= 1);
-    // recognizer 'auto' (the default): WebAssembly with threads, no check
+    // recognizer 'auto' (the default): backend 'wasm' (the Node.js default) keeps WebAssembly, no check (as in 0.2.0)
     assert.equal(worker.info.recognizer, 'wasm');
-    assert.match(worker.info.recognizerReason, /threads here/);
+    assert.deepEqual(worker.info.recognizers, { 320: 'wasm', 640: 'wasm', 960: 'wasm' });
+    assert.match(worker.info.recognizerReason, /threads? here/);
     assert.equal(worker.info.recognizerCheck, null);
+    assert.deepEqual(worker.info.recognizerChecks, { 320: null, 640: null, 960: null });
     report.info = worker.info;
   });
 

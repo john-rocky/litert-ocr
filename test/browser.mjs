@@ -111,11 +111,19 @@ try {
   for (const name of ['failModel404', 'failSha256', 'failWasm404', 'failDecode', 'failType', 'failImage404', 'failRectangle', 'failTerminated', 'failErrorHandler', 'failDetectAndOutputs', 'forcedWasm']) await run(main.page, name);
   await run(main.page, 'failCrossOriginFetch', { otherOrigin });
   await run(main.page, 'webgpuRecognizer', { mode, published: PUBLISHED, ...rec320('coi') });
-  // recognizer 'auto' (the default): cross-origin isolated = threads in Chrome, 1 thread in WebKit
-  const autoCoi = WEBKIT ? (REC320 || PUBLISHED ? 'webgpu' : 'unpublished') : 'threads';
+  // recognizer 'webgpu' and 'wasm': as in 0.2.0 (no check, same backends and sentences)
+  await run(main.page, 'recognizerOptions', { mode });
+  // recognizer 'auto' (the default): where a WebGPU device exists the start check runs (Chrome with threads since
+  // 0.2.1, WebKit with 1 thread as in 0.2.0); Chrome without a GPU keeps WebAssembly with no check
+  const autoCoi = mode === 'wasm' ? 'nogpu' : REC320 || PUBLISHED ? 'webgpu' : 'unpublished';
   await run(main.page, 'recognizerAuto', { ...rec320('coi'), expect: autoCoi }, 300000);
-  if (autoCoi === 'webgpu') await run(main.page, 'recognizerAutoMismatch', rec320('coi'));
-  if (WEBKIT) await run(main.page, 'recognizerAutoHub320', {}, 300000); // record only
+  if (autoCoi === 'webgpu') {
+    for (const hook of ['mismatch', 'drift', 'mismatch640']) await run(main.page, 'recognizerAutoFail', { ...rec320('coi'), hook }, 300000);
+    await run(main.page, 'recognizerAutoLose', rec320('coi'), 300000);
+  }
+  // backend 'wasm' where WebAssembly has threads (the Node.js default, asked here in a browser): no check, as in 0.2.0
+  if (!WEBKIT) await run(main.page, 'recognizerAuto', { expect: 'backendwasm', extra: { backend: 'wasm' } }, 300000);
+  if (mode !== 'wasm') await run(main.page, 'recognizerAutoHub320', {}, 300000); // record only
   await run(main.page, 'cutShortNotice');
   // documents (convert) and extract
   const layoutBase = LAYOUT ? `${origin}/coi/layout/` : null;
@@ -154,6 +162,16 @@ try {
     await (pf.dispose ? pf.dispose() : pf.context.close());
   }
 
+  // the WebGPU form of the 320 file cannot be loaded (a model directory made for 0.1.0, or offline with only the plain
+  // file cached): recognizer 'auto' reads with the plain file on WebAssembly, no error
+  if (mode !== 'wasm' && !REC320 && PUBLISHED) {
+    const missing = await open('coi', async (ctx) => {
+      await ctx.route(/_webgpu\.tflite/, (r) => r.abort('connectionfailed'));
+    });
+    await run(missing.page, 'recognizerAutoFileMissing', {}, 300000);
+    await missing.context.close();
+  }
+
   // blocked defaults (Hugging Face and jsDelivr unreachable)
   const blocked = await open('coi', async (ctx) => {
     await ctx.route(/huggingface\.co|jsdelivr\.net/, (r) => r.abort('blockedbyclient'));
@@ -174,7 +192,7 @@ try {
   await run(plain.page, 'failTaintedImage', { otherOrigin });
   const autoPlain = mode === 'wasm' ? 'nogpu' : REC320 || PUBLISHED ? 'webgpu' : 'unpublished';
   await run(plain.page, 'recognizerAuto', { ...rec320('plain'), expect: autoPlain }, 300000);
-  if (autoPlain === 'webgpu') await run(plain.page, 'recognizerAutoMismatch', rec320('plain'));
+  if (autoPlain === 'webgpu') await run(plain.page, 'recognizerAutoFail', { ...rec320('plain'), hook: 'mismatch' }, 300000);
   if (mode === 'webgpu') await run(plain.page, 'recognizerAutoHub320', {}, 300000); // record only
   await plain.context.close();
 

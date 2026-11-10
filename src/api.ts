@@ -5,7 +5,7 @@
 import { OEM, PSM, SINGLE_LINE_PSM, checkLangs, languages } from './core/constants.js';
 import { OcrError, deserializeError } from './core/errors.js';
 import type { CacheMethod } from './core/fetcher.js';
-import type { DocPageData } from './core/handler.js';
+import type { DocPageData, RecState } from './core/handler.js';
 import { LAYOUT_BASE, MODEL_ROLES, type ModelRole } from './core/models.js';
 import type { DocPageOptions, InitOptions, JobParams, ProgressData, Request, Response, WireImage } from './core/protocol.js';
 import type { DocPlatform } from './doc/convert.js';
@@ -178,7 +178,9 @@ export function makeApi(main: MainPlatform) {
           if (asked.length) localNotice(jid, `Output formats not produced by this library (null in the result): ${asked.join(', ')}. text, blocks, hocr and tsv are available.`, 'warn');
           const { wire, transfer } = await main.toWire(image);
           const out = { text: true, ...output };
-          const r = await call<{ page: Page }>({ type: 'recognize', id: jid, image: wire, rectangle: rect, params: job, output: out }, transfer);
+          const r = await call<{ page: Page; state?: RecState | null }>({ type: 'recognize', id: jid, image: wire, rectangle: rect, params: job, output: out }, transfer);
+          // a wider recognizer loaded (and checked) for this image, or a fallback: worker.info follows
+          if (r.state) Object.assign(info, r.state);
           return { jobId: jid, data: r.page };
         } catch (e) {
           const err = e instanceof OcrError ? e : new OcrError('INTERNAL', String((e as Error)?.message ?? e));
@@ -333,8 +335,9 @@ function buildInit(options: Partial<WorkerOptions>, main: MainPlatform): InitOpt
     prefetch,
     layoutBase: options.layoutModelBase ? dir(main.resolveUrl(options.layoutModelBase)) : LAYOUT_BASE,
   };
-  // tests only (not in WorkerOptions): make the start check of recognizer 'auto' see different outputs
-  if ((options as Record<string, unknown>)._recognizerCheck === 'mismatch') o.recognizerCheck = 'mismatch';
+  // tests only (not in WorkerOptions): make a check of recognizer 'auto' fail, or lose the WebGPU device after start
+  const hook = (options as Record<string, unknown>)._recognizerCheck;
+  if (hook === 'mismatch' || hook === 'drift' || hook === 'mismatch640' || hook === 'lose') o.recognizerCheck = hook;
   const lb = options.layoutBackend ?? 'auto';
   if (lb !== 'auto' && lb !== 'wasm') throw new OcrError('INVALID_ARGUMENT', `options.layoutBackend must be 'auto' or 'wasm', got ${JSON.stringify(lb)}.`);
   if (lb === 'wasm') o.layoutBackend = 'wasm';

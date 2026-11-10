@@ -3,7 +3,7 @@
 // the Hub or the CDN can never change what the library computes.
 
 export const PKG_NAME = 'litert-ocr';
-export const PKG_VERSION = '0.2.0';
+export const PKG_VERSION = '0.2.1';
 
 /** Hugging Face repository and the commit the files are read from. */
 export const MODEL_REPO = 'litert-community/PP-OCRv6-Small-LiteRT';

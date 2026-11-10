@@ -303,23 +303,25 @@ window.tests = {
   },
 
   // recognizer 'auto' (the default). The runner names what this browser and page must choose (`expect`):
-  //   'webgpu'      WebAssembly has 1 thread, a WebGPU device exists and the WebGPU form of the 320 file is pinned or
-  //                 given (rec320Url): the check line reads the same, every fixture and a long line (640 / 960) read the same
-  //                 text as recognizer 'wasm'
-  //   'threads'     WebAssembly has several threads: WebAssembly, no check
-  //   'nogpu'       1 thread, no WebGPU device: WebAssembly, no check
-  //   'unpublished' 1 thread, WebGPU, no WebGPU form of the 320 file: WebAssembly, no check
-  async recognizerAuto({ rec320Url, rec320Sha, expect }) {
+  //   'webgpu'      a WebGPU device exists, WebAssembly has 1 thread or backend is 'auto', and the WebGPU form of the
+  //                 320 file is pinned or given (rec320Url): the check line reads the same at every width (argmax and
+  //                 probabilities within the check's limit), every fixture and a long line (640 / 960) read the same text
+  //                 as recognizer 'wasm', and worker.info shows all three widths on WebGPU with a passed check each
+  //   'backendwasm' WebAssembly has several threads and backend is 'wasm' (the Node.js default): WebAssembly, no check
+  //   'nogpu'       no WebGPU device: WebAssembly, no check
+  //   'unpublished' WebGPU, no WebGPU form of the 320 file: WebAssembly, no check
+  async recognizerAuto({ rec320Url, rec320Sha, expect, extra = {} }) {
     const notices = [];
     const opts = rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {};
-    const auto = await ocr.createWorker('eng', 1, local({ ...opts, logger: (m) => m.status === 'notice' && notices.push(m.message) }));
+    const auto = await ocr.createWorker('eng', 1, local({ ...opts, ...extra, logger: (m) => m.status === 'notice' && notices.push(m.message) }));
     const info = auto.info;
     const said = notices.filter((n) => n.startsWith('Recognizer on'));
-    const reasonOk = { webgpu: /read the check line exactly as WebAssembly/, threads: /runs on \d+ threads here/, nogpu: /no WebGPU device/, unpublished: /was not loaded/ }[expect];
+    const reasonOk = { webgpu: /read the check line as WebAssembly did/, backendwasm: /runs on \d+ threads here and backend is 'wasm'/, nogpu: /no WebGPU device/, unpublished: /was not loaded/ }[expect];
     let ok = said.length === 1 && reasonOk.test(info.recognizerReason) && said[0].includes(info.recognizerReason);
-    const out = { expect, info, notice: said[0] ?? null };
+    const passed = (c) => !!c && c.differing === 0 && c.maxDiff <= c.limit;
+    const out = { expect, start: JSON.parse(JSON.stringify(info)), notice: said[0] ?? null };
     if (expect === 'webgpu') {
-      ok &&= info.recognizer === 'webgpu' && info.recognizerCheck?.differing === 0 && /Total|8,415|合計/.test(info.recognizerCheck.text);
+      ok &&= info.recognizer === 'webgpu' && passed(info.recognizerCheck) && /Total|8,415|合計/.test(info.recognizerCheck.text);
       const wasm = await ocr.createWorker('eng', 1, local({ recognizer: 'wasm' }));
       const long = canvasWithText(2100, 80, ['The quick brown fox jumps over the lazy dog while 12 bakers count 3,456 loaves of bread'], '44px Arial');
       const images = { ...Object.fromEntries(Object.keys(await fixtures()).map((f) => [f, FIX + f])), 'long line (640 and 960)': long };
@@ -330,23 +332,106 @@ window.tests = {
         out.same[k] = a === b ? true : { wasm: a.split('\n').filter((x) => !b.includes(x)), webgpu: b.split('\n').filter((x) => !a.includes(x)) };
       }
       await wasm.terminate();
-      out.laterNotices = notices.filter((n) => /recognizer read the check line differently|could not run the \d+-wide recognizer/.test(n));
-      ok &&= Object.values(out.same).every((v) => v === true) && out.laterNotices.length === 0;
+      out.end = JSON.parse(JSON.stringify(auto.info));
+      out.maxDiff = Object.fromEntries(Object.entries(out.end.recognizerChecks).map(([w, c]) => [w, c?.maxDiff ?? null]));
+      out.laterNotices = notices.filter((n) => !n.startsWith('Recognizer on') && /recognizer read the check line|could not run the \d+-wide recognizer/.test(n));
+      ok &&= Object.values(out.same).every((v) => v === true)
+        && ['320', '640', '960'].every((w) => out.end.recognizers[w] === 'webgpu' && passed(out.end.recognizerChecks[w]))
+        && out.laterNotices.length === 2 && out.laterNotices.every((n) => /as WebAssembly did/.test(n));
     } else {
-      ok &&= info.recognizer === 'wasm' && info.recognizerCheck === null;
+      ok &&= info.recognizer === 'wasm' && info.recognizerCheck === null && Object.values(info.recognizerChecks).every((c) => c === null);
       ok &&= /Electricity Bill/.test((await auto.recognize(FIX + 'mobile.png')).data.text);
+      out.end = JSON.parse(JSON.stringify(auto.info));
+      ok &&= out.end.recognizer === 'wasm';
     }
     await auto.terminate();
     return { ok, ...out };
   },
-  // the check made to see a differing output (a test hook): the recognizer stays on WebAssembly and says why
-  async recognizerAutoMismatch({ rec320Url, rec320Sha }) {
-    const w = await ocr.createWorker('eng', 1, local({ ...(rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {}), _recognizerCheck: 'mismatch' }));
-    const info = w.info;
+  // a check made to fail (test hooks): 'mismatch' (one argmax changed at 320) and 'drift' (one probability moved past
+  // the limit at 320, no argmax changed) keep every width on WebAssembly; 'mismatch640' keeps only 640 there (320 and
+  // 960 pass their checks). The text is the same as recognizer 'wasm' in every case.
+  async recognizerAutoFail({ rec320Url, rec320Sha, hook }) {
+    const notices = [];
+    const w = await ocr.createWorker('eng', 1, local({ ...(rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {}), _recognizerCheck: hook, logger: (m) => m.status === 'notice' && notices.push(m.message) }));
+    const start = JSON.parse(JSON.stringify(w.info));
+    const wasm = await ocr.createWorker('eng', 1, local({ recognizer: 'wasm' }));
+    const long = canvasWithText(2100, 80, ['The quick brown fox jumps over the lazy dog while 12 bakers count 3,456 loaves of bread'], '44px Arial');
+    const mid = canvasWithText(700, 80, ['Quiet harbor, 48 boats'], '44px Arial');
+    const same = {};
+    for (const [k, img] of Object.entries({ 'mobile.png': FIX + 'mobile.png', 'a 640 line': mid, 'a 960 line': long })) {
+      const a = (await wasm.recognize(img)).data.text;
+      const b = (await w.recognize(img)).data.text;
+      same[k] = a === b;
+    }
+    await wasm.terminate();
+    const end = JSON.parse(JSON.stringify(w.info));
+    await w.terminate();
+    let ok = Object.values(same).every(Boolean);
+    if (hook === 'mismatch640') {
+      ok &&= start.recognizers['320'] === 'webgpu' && end.recognizers['320'] === 'webgpu' && end.recognizers['640'] === 'wasm' && end.recognizers['960'] === 'webgpu'
+        && end.recognizerChecks['640']?.differing >= 1 && notices.some((n) => /640-wide recognizer read the check line differently/.test(n));
+    } else {
+      const c = start.recognizerCheck;
+      const failed = hook === 'drift' ? c?.differing === 0 && c.maxDiff > c.limit : c?.differing >= 1;
+      ok &&= start.recognizer === 'wasm' && failed && /read the check line differently/.test(start.recognizerReason)
+        && Object.values(end.recognizers).every((b) => b === 'wasm') && end.recognizerChecks['640'] === null && end.recognizerChecks['960'] === null;
+    }
+    return { ok, hook, same, start, end, notices };
+  },
+  // the WebGPU device lost after start (test hook 'lose' destroys it): the worker keeps reading on WebAssembly with the
+  // same text as recognizer 'wasm', says so, and worker.info follows
+  async recognizerAutoLose({ rec320Url, rec320Sha }) {
+    const notices = [];
+    const w = await ocr.createWorker('eng', 1, local({ ...(rec320Url ? { modelFiles: { rec320: { url: rec320Url, sha256: rec320Sha } } } : {}), _recognizerCheck: 'lose', logger: (m) => m.status === 'notice' && notices.push(m.message) }));
+    const start = JSON.parse(JSON.stringify(w.info));
+    const wasm = await ocr.createWorker('eng', 1, local({ recognizer: 'wasm' }));
+    const long = canvasWithText(2100, 80, ['The quick brown fox jumps over the lazy dog while 12 bakers count 3,456 loaves of bread'], '44px Arial');
+    const same = {};
+    for (const [k, img] of Object.entries({ 'mobile.png': FIX + 'mobile.png', 'long line (640 and 960)': long })) {
+      const a = (await wasm.recognize(img)).data.text;
+      let b;
+      try { b = (await w.recognize(img)).data.text; } catch (e) { b = `ERROR ${e?.code} ${e?.message}`; }
+      same[k] = a === b ? true : { wasm: a, auto: b };
+    }
+    await wasm.terminate();
+    const end = JSON.parse(JSON.stringify(w.info));
+    await w.terminate();
+    const ok = start.recognizers['320'] === 'webgpu' && Object.values(same).every((v) => v === true)
+      && Object.values(end.recognizers).every((b) => b === 'wasm') && end.detector === 'wasm'
+      && notices.some((n) => /recognizer failed .*switching it to WebAssembly/.test(n));
+    return { ok, same, start, end, notices: notices.slice(-8) };
+  },
+  // the WebGPU form of the 320 file cannot be loaded (the runner aborts its requests): recognizer 'auto' reads with
+  // the plain file on WebAssembly and says why; no error
+  async recognizerAutoFileMissing() {
+    const notices = [];
+    const w = await ocr.createWorker('eng', 1, local({ logger: (m) => m.status === 'notice' && notices.push({ level: m.level, message: m.message }) }));
+    const info = JSON.parse(JSON.stringify(w.info));
     const text = (await w.recognize(FIX + 'mobile.png')).data.text;
     await w.terminate();
-    const ok = info.recognizer === 'wasm' && info.recognizerCheck?.differing >= 1 && /read the check line differently/.test(info.recognizerReason) && /Electricity Bill/.test(text);
-    return { ok, info };
+    const warned = notices.some((n) => /WebGPU form of the 320-wide recognizer .*could not be loaded/.test(n.message));
+    const ok = warned && info.recognizer === 'wasm' && info.recognizerCheck === null && /was not loaded/.test(info.recognizerReason) && /Electricity Bill/.test(text);
+    return { ok, info, notices };
+  },
+  // recognizer 'webgpu' and 'wasm' as in 0.2.0: no check, the same backends and the same sentences
+  async recognizerOptions({ mode }) {
+    const g = await ocr.createWorker('eng', 1, local({ recognizer: 'webgpu' }));
+    const gi = JSON.parse(JSON.stringify(g.info));
+    const gt = (await g.recognize(FIX + 'mobile.png')).data.text;
+    await g.terminate();
+    const w = await ocr.createWorker('eng', 1, local({ recognizer: 'wasm' }));
+    const wi = JSON.parse(JSON.stringify(w.info));
+    const wt = (await w.recognize(FIX + 'mobile.png')).data.text;
+    await w.terminate();
+    const gpuWanted = mode === 'wasm' ? 'wasm' : 'webgpu';
+    const gpuReason = mode === 'wasm'
+      ? 'recognizer: "webgpu" was asked: there is no WebGPU device here, so the recognizers run on WebAssembly.'
+      : 'recognizer: "webgpu" was asked: the recognizers run on WebGPU (not checked against WebAssembly).';
+    const ok = gi.recognizerCheck === null && wi.recognizerCheck === null
+      && Object.values(gi.recognizers).every((b) => b === gpuWanted) && gi.recognizerReason === gpuReason
+      && Object.values(wi.recognizers).every((b) => b === 'wasm') && wi.recognizerReason === 'recognizer: "wasm" was asked, so the recognizers run on WebAssembly.'
+      && gt === wt && /Electricity Bill/.test(wt);
+    return { ok, webgpu: gi, wasm: wi };
   },
 
   // record only (always ok): the start check given the published 320 file, which misreads lines on WebGPU (LiteRT

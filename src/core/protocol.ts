@@ -14,8 +14,8 @@ export interface InitOptions {
   backend: 'auto' | 'wasm';
   /** Where the recognizers run (see WorkerOptions.recognizer); absent = 'auto'. */
   recognizer?: 'auto' | 'wasm' | 'webgpu';
-  /** Tests only: 'mismatch' makes the start check of recognizer 'auto' see different outputs. */
-  recognizerCheck?: 'mismatch';
+  /** Tests only: make a check of recognizer 'auto' fail, or lose the WebGPU device after start (EngineInit.checkHook). */
+  recognizerCheck?: 'mismatch' | 'drift' | 'mismatch640' | 'lose';
   cacheMethod: CacheMethod;
   cachePath?: string;
   /** Load the 640 and 960 recognizers at start instead of on first use. */

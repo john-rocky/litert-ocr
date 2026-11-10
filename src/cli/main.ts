@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { createConverter, OcrError, type ConvertOptions, type ConverterOptions } from 'litert-ocr';
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 
 const HELP = `litert-ocr ${VERSION}: PDFs, scans and photos -> Markdown (with tables), JSON or text, on this machine.
 

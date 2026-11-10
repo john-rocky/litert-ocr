@@ -1,6 +1,6 @@
 {
   "name": "litert-ocr",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OCR in the browser and Node.js with the tesseract.js API: PP-OCRv6-Small on LiteRT.js (WebGPU or WebAssembly), images never leave the device. PDFs, scans and photos to Markdown with tables, JSON or text; a CLI and an MCP server.",
   "keywords": [
     "ocr",

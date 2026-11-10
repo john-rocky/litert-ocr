@@ -102,7 +102,7 @@ export interface Page {
   psm: string | null;
   /** Not used by this engine (null). */
   oem: string | null;
-  /** Library, model and runtime, e.g. "litert-ocr 0.2.0 (PP-OCRv6-Small @a9b2feb, LiteRT.js 2.5.3)". */
+  /** Library, model and runtime, e.g. "litert-ocr 0.2.1 (PP-OCRv6-Small @a9b2feb, LiteRT.js 2.5.3)". */
   version: string;
 }
 
@@ -189,13 +189,15 @@ export interface WorkerOptions {
   workerPath: string;
   /**
    * Where the recognizers run.
-   * 'auto' (default): WebAssembly, except where WebAssembly runs on 1 thread (no relaxed SIMD, as in Safari, or a page
-   *   that is not cross-origin isolated), a WebGPU device exists and the WebGPU form of the 320-wide recognizer is
-   *   available (modelInfo.rec320WebGpu, or a file given as modelFiles.rec320). Then one fixed
-   *   text line is read on both WebAssembly and WebGPU at start, and on each wider recognizer when it first loads: the
-   *   recognizer moves to WebGPU only if the outputs are the same. worker.info.recognizerReason says what was chosen
-   *   and why; the logger gets the same as a notice.
-   * 'wasm': always WebAssembly (the measured default where WebAssembly has threads).
+   * 'auto' (default): WebGPU where a WebGPU device exists, the WebGPU form of the 320-wide recognizer is available
+   *   (modelInfo.rec320WebGpu, or a file given as modelFiles.rec320) and either `backend` is 'auto' (the browser
+   *   default) or WebAssembly runs on 1 thread (no relaxed SIMD, as in Safari, or a page that is not cross-origin
+   *   isolated) — and only after a check: one fixed text line is read on both WebAssembly and WebGPU at start, and on
+   *   each wider recognizer when it first loads; a width moves to WebGPU only if every output step's argmax is the
+   *   same and no output probability differs by more than 0.001. Everywhere else, and for a width whose check fails,
+   *   WebAssembly. Node.js, Deno and Bun (backend 'wasm' by default) keep WebAssembly. worker.info.recognizerReason
+   *   says what was chosen and why; the logger gets the same as a notice.
+   * 'wasm': always WebAssembly.
    * 'webgpu' (experimental): every recognizer on WebGPU, the 320 one with its WebGPU form (modelInfo.rec320WebGpu;
    *   ppocrv6_small_rec_320_fp32.tflite misreads lines on WebGPU, LiteRT issue #9661); no check. Falls back to
    *   WebAssembly, with a notice, where WebGPU fails.
@@ -243,12 +245,30 @@ export interface WorkerOptions {
   legacyLang: boolean;
 }
 
+/** One check of recognizer 'auto': the fixed line read by one width's recognizer on WebAssembly and on WebGPU. */
+export interface RecognizerCheckInfo {
+  width: number;
+  /** Output steps compared (argmax over the vocabulary per step). */
+  steps: number;
+  /** Steps whose argmax differs. */
+  differing: number;
+  /** Largest absolute difference between the two outputs' probabilities (any step, any vocabulary entry). */
+  maxDiff: number;
+  /** The largest maxDiff with which the check passes (with no step differing). */
+  limit: number;
+  /** Time of the check (both compiles, warm-ups and reads), ms. */
+  ms: number;
+  /** The line as WebAssembly read it. */
+  text: string;
+}
+
 export interface WorkerInfo {
   /** Where the text detector runs: 'webgpu' or 'wasm'. */
   detector: 'webgpu' | 'wasm';
   /**
-   * Where the recognizers run: 'wasm' unless the recognizer option moved them (see WorkerOptions.recognizer); per
-   * width in `recognizers` (640 / 960 load on first use, so theirs is the plan until then).
+   * Where the recognizers run (see WorkerOptions.recognizer); per width in `recognizers`. 640 / 960 load on first
+   * use: until then theirs is the plan, and after each recognize() these fields show where every loaded width runs
+   * (its own check, or a switch to WebAssembly after a WebGPU failure).
    */
   recognizer: 'wasm' | 'webgpu' | 'mixed';
   recognizers: { '320': 'wasm' | 'webgpu'; '640': 'wasm' | 'webgpu'; '960': 'wasm' | 'webgpu' };
@@ -256,10 +276,12 @@ export interface WorkerInfo {
   recognizerReason: string;
   /**
    * The start check of recognizer 'auto' (one fixed line read on WebAssembly and on WebGPU by the 320-wide
-   * recognizer): output steps compared, how many differ, the time, and the line as WebAssembly read it; null when
-   * no check ran.
+   * recognizer): output steps compared, how many argmaxes differ, the largest difference of any output probability,
+   * the time, and the line as WebAssembly read it; null when no check ran.
    */
-  recognizerCheck: { width: number; steps: number; differing: number; ms: number; text: string } | null;
+  recognizerCheck: RecognizerCheckInfo | null;
+  /** The check of each width (recognizer 'auto'), null where none ran (yet). */
+  recognizerChecks: { '320': RecognizerCheckInfo | null; '640': RecognizerCheckInfo | null; '960': RecognizerCheckInfo | null };
   /** WebAssembly threads used (1 when the page is not cross-origin isolated, or the browser has no WebAssembly relaxed SIMD, as Safari). */
   threads: number;
   runtime: string;
