@@ -52,9 +52,9 @@ if (typeof window === 'undefined') {
     });
 
     // [litert-ocr demo] the files kept for offline visits: this origin's GET requests, the pinned library module and
-    // the pdf.js version it pins (litert-ocr 0.2.0: pdfjs-dist 6.4.299)
+    // the pdf.js version it pins (litert-ocr 0.2.1: pdfjs-dist 6.4.299)
     const OFFLINE_CACHE = "litert-ocr-demo-page";
-    const keep = (r) => r.method === "GET" && (new URL(r.url).origin === self.location.origin || r.url === "https://cdn.jsdelivr.net/npm/litert-ocr@0.2.0/+esm" || r.url.startsWith("https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/"));
+    const keep = (r) => r.method === "GET" && (new URL(r.url).origin === self.location.origin || r.url === "https://cdn.jsdelivr.net/npm/litert-ocr@0.2.1/+esm" || r.url.startsWith("https://cdn.jsdelivr.net/npm/pdfjs-dist@6.4.299/"));
 
     function withHeaders(response) {
         const newHeaders = new Headers(response.headers);

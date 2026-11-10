@@ -6,7 +6,7 @@
 
 import { renderMarkdown } from './md.js';
 
-const LIBRARY = 'https://cdn.jsdelivr.net/npm/litert-ocr@0.2.0/+esm';
+const LIBRARY = 'https://cdn.jsdelivr.net/npm/litert-ocr@0.2.1/+esm';
 /** Pages read per PDF on this page; the library itself reads up to `maxPages` (default 100). */
 const MAX_PAGES = 20;
 /** convert() reads PDF pages at 150 dpi; block boxes are in pixels of that size. */

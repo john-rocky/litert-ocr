@@ -12,7 +12,7 @@
   <script type="module">
     // The library called directly with the options the demo page uses (record/check.mjs compares the page with it):
     // recognize() for an image's text, convert() for Markdown, JSON and text.
-    const lib = await import('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.0/+esm');
+    const lib = await import('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.1/+esm');
     const worker = await lib.createWorker('eng', 1, { eager: true, prefetch: false });
     const converter = lib.createConverter({ eager: true, prefetch: false, layout: 'geometry' });
     window.direct = async (url, kind, extra = {}) => {
