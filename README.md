@@ -123,7 +123,7 @@ const { data, valid, errors } = await extract(receiptImage, schema, {
 The document is read by OCR (a PDF: its text), the lines are laid out in rows, and Gemma 4 E2B (its web build) on LiteRT-LM JS answers with a JSON object for the schema. The answer is repaired only by removing a code fence, the text around the object and trailing commas, then checked against the schema (types, required fields, `enum`): `valid` and `errors` say how it went, `raw` holds the answer as it came.
 
 - Browser only, with WebGPU. In Node.js `extract()` rejects with `LLM_UNAVAILABLE`.
-- Needs the optional peer dependency `@litert-lm/core@0.19.0-nightly.20261018`: `npm install @litert-lm/core@0.19.0-nightly.20261018`, or pass `{ llm: { module } }`. It is a nightly because the current stable release, 0.18.1, cannot create an engine ([LiteRT-LM issue #4051](https://github.com/google-ai-edge/LiteRT-LM/issues/4051)); this moves to the stable release that fixes it.
+- Needs the optional peer dependency `@litert-lm/core@0.19.0-nightly.20261018`: `npm install @litert-lm/core@0.19.0-nightly.20261018`, or pass `{ llm: { module } }`. extract() was measured with that nightly (below), because the stable 0.18.1 cannot create an engine ([LiteRT-LM issue #4051](https://github.com/google-ai-edge/LiteRT-LM/issues/4051)); the stable 0.19.0 has not been tested with litert-ocr.
 - The first call downloads the model, 2.0 GB (2,008,432,640 bytes, `gemma-4-E2B-it-web.litertlm` from Hugging Face litert-community/gemma-4-E2B-it-litert-lm at a pinned commit), into the browser cache; the logger says so, and later calls read the cache. `createExtractor()` keeps the model loaded for several documents.
 
 On 74 receipts of the CORD v2 test set, with `documentType: 'receipt'` and the `instructions` shown above (the default instructions are shorter and were not measured), the answer parsed as JSON for 74 of 74 and 440 of 687 fields (64.0 %) matched the reference (item names, quantities and prices, subtotal, tax, total). The model took 2.0 s per receipt, 2.1 s with the OCR (medians; Mac Studio, Apple M4 Max, Chrome 155 headless, LiteRT-LM JS 0.19.0-nightly.20261018, 2026-10-20).
@@ -214,16 +214,14 @@ Safari has no WebAssembly relaxed SIMD, which the threaded LiteRT.js build needs
 
 Measured with the default (2026-11-10, litert-ocr 0.2.1):
 
-| Browser | Recognizer (320 / 640 / 960) | Lines as with `recognizer: 'wasm'` | Time per image, default / `'wasm'` | Start, 0.2.1 / 0.2.0 |
-|---|---|---|---|---|
-| Chrome 157 on a Mac Studio (Apple M4 Max), 281 of the 295 images of the table above | WebGPU / WebGPU / WebGPU | 6,876 of 6,876 | 173 / 276 ms | 0.84 / 0.89 s |
-| WebKit 26.5 on the same Mac, the 12 images of the table at the top | WebGPU / WebGPU / WebGPU | 333 of 333 | 291 / 1,977 ms | — |
-| Chrome 156 on a Galaxy S26, the same 12 images | WebGPU / WebAssembly (its check differed in 1 or 2 of 80 output steps, 7 of 7 times) / WebGPU | 335 of 335 | 766 / 849 ms (the CPU clock was capped on every image, more in the later `'wasm'` run) | 2.46 / 1.62 s |
-| Chrome 156 on a Pixel 8a, the same 12 images | WebGPU / WebGPU / WebGPU | 335 of 335 | 2,982 / 3,843 ms | 6.96 / 6.14 s |
+| Browser | Recognizer 320 / 640 / 960 | Lines as with `recognizer: 'wasm'` | Time per image, default / `'wasm'` |
+|---|---|---|---|
+| Chrome 157 on a Mac Studio (Apple M4 Max), 281 of the 295 images of the table above | WebGPU / WebGPU / WebGPU | 6,876 of 6,876 | 173 / 276 ms |
+| WebKit 26.5 on the same Mac, the 12 images of the table at the top | WebGPU / WebGPU / WebGPU | 333 of 333 | 291 / 1,977 ms |
+| Chrome 156 on a Galaxy S26, the same 12 images | WebGPU / WebAssembly / WebGPU | 335 of 335 | 766 / 849 ms |
+| Chrome 156 on a Pixel 8a, the same 12 images | WebGPU / WebGPU / WebGPU | 335 of 335 | 2,982 / 3,843 ms |
 
-The Mac ran other work during these runs, so its times compare within a row only. Start = from `createWorker()` to the first text of the 390 x 800 phone screenshot, with the files in the cache (median of 3). The checks are part of it, as that screenshot needs the 320 and 640-wide recognizers (medians of the same 3 starts): 0.81 and 0.46 s on the Galaxy S26, 2.03 and 1.32 s on the Pixel 8a, 0.20 and 0.24 s on the Mac.
-
-The check reads one line, so it is a coarse guard: given `ppocrv6_small_rec_320_fp32.tflite` instead (which misreads lines on WebGPU), it saw the difference in Chrome 157 on the Mac (2 of 40 output steps) but not in WebKit 26.5, where that line read the same (probabilities within 2.9e-6). On the Galaxy S26, `recognizer: 'webgpu'` (every width on WebGPU, no check) read 13 of the 335 lines differently in Chrome 155 (2026-10-20). The detector reads the same on WebGPU and WebAssembly.
+On the Galaxy S26 the 640-wide check failed all 7 times, so that width ran on WebAssembly there. A start with the files in the cache, the checks included, took about 0.8 s longer than with 0.2.0 on the two phones and no longer on the Mac. The check reads one line, so it is a coarse guard; the numbers behind this table are in [docs/recognizer-auto.md](https://github.com/john-rocky/litert-ocr/blob/main/docs/recognizer-auto.md).
 
 ## Offline
 
