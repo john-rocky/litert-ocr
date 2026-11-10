@@ -175,7 +175,8 @@ function logger(source) {
       else if (m.status === 'initializing model') setStatus('busy', 'Preparing the model…');
     }
     if (m.status === 'notice' && m.message) {
-      if (/^Recognizer on /.test(m.message)) return;
+      // where the recognizers run is on the info line: the start notice and the per-width check notices (0.2.1) stay off
+      if (/^Recognizer on |^The \d+-wide recognizer read the check line /.test(m.message)) return;
       if (/not cross-origin isolated/.test(m.message)) return; // said above in this page's words
       // a file the browser would not store: the status line must not say the files are kept
       const notKept = /^Could not cache (\S+)/.exec(m.message)?.[1];
