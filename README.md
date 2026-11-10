@@ -1,20 +1,20 @@
 # litert-ocr
 
-OCR for photos and screenshots in the browser and in Node.js, with the tesseract.js API. It runs PP-OCRv6-Small on LiteRT.js. On a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 318 ms (median of 10 English and Japanese screenshots, photos and receipts, 2026-10-20).
+OCR for photos and screenshots in the browser and in Node.js, with the tesseract.js API. It runs PP-OCRv6-Small on LiteRT.js. On a Mac Studio (Apple M4 Max) in Chrome 155 an image takes 318 ms (median of 10 English and Japanese screenshots, photos and receipts, 2026-10-20, litert-ocr before 0.2.1).
 
-In the browser the text detector runs on WebGPU when the browser has it and the recognizer on WebAssembly, inside a Web Worker. (In Safari, where WebAssembly has one thread, the recognizer moves to WebGPU when a check at start passes: [below](#safari-and-webgpu).) In Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
+In the browser the text detector runs on WebGPU when the browser has it, inside a Web Worker. The recognizer runs on WebAssembly, and moves to WebGPU for each width whose check passes: one fixed line read both ways when that width loads ([below](#safari-and-webgpu)). In Node.js, Deno and Bun everything runs on WebAssembly in a worker thread. Images never leave the device. Independent project, not affiliated with Google or PaddlePaddle.
 
 It also turns PDFs, scans and photos into Markdown with tables, JSON or text ([`convert`](#documents--markdown)), fills a JSON Schema from a document with an on-device language model in the browser ([`extract`](#extract-json)), and runs from the command line ([`npx litert-ocr`](#cli)) and as an MCP server for coding agents ([`npx litert-ocr mcp`](#mcp)).
 
 Try it on your own photo, scan or PDF: [the demo](https://mlboydaisuke-litert-ocr.static.hf.space/) (a Hugging Face Space, at its own address) reads it in the browser tab and shows the text with its line boxes, a PDF's page with a frame around each block, Markdown and JSON ([`demo/`](demo)). The same page is on [the Space's page on huggingface.co](https://huggingface.co/spaces/mlboydaisuke/litert-ocr), inside a frame (there Chrome on a Galaxy S26 read more slowly), and on [GitHub Pages](https://john-rocky.github.io/litert-ocr/).
 
-Status: v0. Tested in Node.js 24, Deno 2.9 and Bun 1.4, and in these browsers (2026-10-20; 12 images: 6 English and Japanese screenshots, 3 photos of English text, 2 receipts and a 4032 x 3024 photo with Japanese text; time = from handing over the image file to the text, with the model already loaded; median of the 10 images that needed no extra model download):
+Status: v0. Tested in Node.js 24, Deno 2.9 and Bun 1.4, and in these browsers (2026-10-20, litert-ocr before 0.2.1; the 0.2.1 default is measured in [Safari and WebGPU](#safari-and-webgpu); 12 images: 6 English and Japanese screenshots, 3 photos of English text, 2 receipts and a 4032 x 3024 photo with Japanese text; time = from handing over the image file to the text, with the model already loaded; median of the 10 images that needed no extra model download):
 
 | Browser, device | Detector / recognizer | WebAssembly threads | Time per image | Text lines identical to Chrome on the Mac |
 |---|---|---|---|---|
 | Chrome 155, Mac Studio (Apple M4 Max) | WebGPU / WebAssembly | 12 | 318 ms | 335 of 335 |
 | WebKit 26.5 (Safari's engine, Playwright's build), same Mac | WebGPU / WebAssembly | 1 | 1,823 ms | 287 of 335 |
-| WebKit 26.5, recognizer on WebGPU with the rewritten 320 file (`recognizer: 'webgpu'`, no check; `'auto'` reaches the same after its check, 267 ms per image: [below](#safari-and-webgpu)) | WebGPU / WebGPU | 1 | 249 ms | 287 of 335 |
+| WebKit 26.5, recognizer on WebGPU with the rewritten 320 file (`recognizer: 'webgpu'`, no check; `'auto'` reaches the same after its check: [below](#safari-and-webgpu)) | WebGPU / WebGPU | 1 | 249 ms | 287 of 335 |
 | Chrome 155, Galaxy S26 | WebGPU / WebAssembly | 8 | 722 ms (CPU slowed by heat) | 335 of 335 |
 | Chrome 155, Pixel 8a | WebGPU / WebAssembly | 9 | 3,563 ms (CPU slowed by heat) | 335 of 335 |
 
@@ -175,7 +175,7 @@ Each detected line is read upright: the image is stretched to 640 x 640 for dete
 
 ## Speed and accuracy
 
-Measured on a Mac Studio (Apple M4 Max), Chrome 155 headless, detector on WebGPU, recognizer on WebAssembly with 12 threads. Time (2026-10-20) = from handing over the image file to the text, with the model loaded. Character error rate (2026-10-19, measured with the test harness this library was built from; the library returns the same lines and boxes on all 295 images, checked 2026-10-20) = the edits between the lines read and the reference lines, matched by their boxes, per reference character; lower is better.
+Measured on a Mac Studio (Apple M4 Max), Chrome 155 headless, with litert-ocr before 0.2.1: detector on WebGPU, recognizer on WebAssembly with 12 threads (with 0.2.1 the recognizer moves to WebGPU there when its check passes: [Safari and WebGPU](#safari-and-webgpu)). Time (2026-10-20) = from handing over the image file to the text, with the model loaded. Character error rate (2026-10-19, measured with the test harness this library was built from; the library returns the same lines and boxes on all 295 images, checked 2026-10-20) = the edits between the lines read and the reference lines, matched by their boxes, per reference character; lower is better.
 
 | Images | Count | Median time | Character error rate |
 |---|---|---|---|
@@ -187,7 +187,7 @@ Measured on a Mac Studio (Apple M4 Max), Chrome 155 headless, detector on WebGPU
 | English book pages (typeset, A4 150 dpi) | 20 | 885 ms | 0.008 |
 | Japanese book pages (typeset, A4 150 dpi) | 15 | 893 ms | 0.003 |
 
-First and second visit (2026-10-20, same Mac and Chrome; the model from Hugging Face and the runtime from jsDelivr, as by default; time = from opening the page to the first text):
+First and second visit (2026-10-20, litert-ocr before 0.2.1, same Mac and Chrome; the model from Hugging Face and the runtime from jsDelivr, as by default; time = from opening the page to the first text):
 
 | Image | First visit (nothing cached) | Downloaded before the first text | Second visit (cached) |
 |---|---|---|---|
@@ -204,13 +204,26 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Without these headers OCR still works, on one thread (several times slower), and the logger and the console say so. When you cannot set headers (GitHub Pages), [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) sets them from a service worker. `worker.info` reports where the worker runs: `{ detector, recognizer, recognizers, recognizerReason, recognizerCheck, threads, runtime, model, platform }`.
+Without these headers OCR still works, on one thread (several times slower), and the logger and the console say so. When you cannot set headers (GitHub Pages), [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) sets them from a service worker. `worker.info` reports where the worker runs: `{ detector, recognizer, recognizers, recognizerReason, recognizerCheck, recognizerChecks, threads, runtime, model, platform }`.
 
 ### Safari and WebGPU
 
 Safari has no WebAssembly relaxed SIMD, which the threaded LiteRT.js build needs, so there WebAssembly runs on 1 thread (WebKit 26.5: 1,823 ms per image against 318 ms in Chrome on the same Mac, table above). The recognizer could run on WebGPU instead, but the plain 320-wide recognizer of the Hugging Face model repository (`ppocrv6_small_rec_320_fp32.tflite`) misreads lines there: with LiteRT.js 2.5.3, 376 of 496 test lines read the same as on WebAssembly (Apple M4 Max, Chrome 155, 2026-10-19), the fault reported for PP-OCRv5 in [LiteRT issue #9661](https://github.com/google-ai-edge/LiteRT/issues/9661). A rewritten 320-wide file (`modelInfo.rec320WebGpu`: the attention scores computed in two halves; on WebAssembly it gives the same numbers as that plain file on every test line) reads the same on WebGPU as on WebAssembly on an Apple M4 Max: all 295 test images in Chrome 155, and the 12 images of the table in WebKit 26.5, where it took 249 ms per image, 0.14 times the WebAssembly time. The 640 and 960 files read the same on WebGPU on that Mac. The rewritten file is in the same Hugging Face repository (`ppocrv6_small_rec_320_fp32_webgpu.tflite`).
 
-`recognizer: 'auto'` (the default) uses it. Where WebAssembly has 1 thread, a WebGPU device exists and that file is available (`modelInfo.rec320WebGpu`, or a file given as `modelFiles.rec320`), the worker reads one fixed text line on WebAssembly and on WebGPU at start and moves the recognizer to WebGPU only if every output step is the same; each wider recognizer is checked the same way when it first loads. With that file given, WebKit 26.5 chose WebGPU this way and read the 12 images in 267 ms per image, with the same text as on WebAssembly (2026-10-21). The check reads one line, so it is a coarse guard: given `ppocrv6_small_rec_320_fp32.tflite` instead (which misreads lines on WebGPU), it saw the difference in Chrome 155 on the Mac (2 of 40 output steps) but not in WebKit 26.5, where that line read the same. Where WebAssembly has threads (Chrome with the two headers above) the recognizer stays on WebAssembly. `worker.info.recognizerReason` and a logger notice say what was chosen and why. On phones WebGPU is not always the better place: in Chrome 155 on a Galaxy S26 the WebGPU recognizer read 13 of 335 lines differently and took longer (843 against 722 ms per image), on a Pixel 8a it read the same text in 0.70 times the time (2026-10-20). The detector reads the same on WebGPU and WebAssembly.
+`recognizer: 'auto'` (the default) moves a recognizer to WebGPU only after a check. In a browser with a WebGPU device, where that file is available (`modelInfo.rec320WebGpu`, or a file given as `modelFiles.rec320`), the worker reads one fixed text line with the 320-wide recognizer on WebAssembly and on WebGPU at start, and uses WebGPU only if every output step picks the same character and no output probability differs by more than 0.001. Each wider recognizer is checked the same way when it first loads; a width whose check fails stays on WebAssembly, and if the 320-wide check fails, every width does. Since 0.2.1 this includes Chrome with the two headers above (WebAssembly with threads); 0.2.0 checked only where WebAssembly ran on 1 thread. With `backend: 'wasm'` (the Node.js, Deno and Bun default) the recognizers stay on WebAssembly with no check. If WebGPU fails while reading (a lost device), that recognizer moves to WebAssembly and the worker goes on. `worker.info.recognizerReason`, `worker.info.recognizerChecks` and a logger notice say what was chosen and why.
+
+Measured with the default (2026-11-10, litert-ocr 0.2.1):
+
+| Browser | Recognizer (320 / 640 / 960) | Lines as with `recognizer: 'wasm'` | Time per image, default / `'wasm'` | Start, 0.2.1 / 0.2.0 |
+|---|---|---|---|---|
+| Chrome 157 on a Mac Studio (Apple M4 Max), 281 of the 295 images of the table above | WebGPU / WebGPU / WebGPU | 6,876 of 6,876 | 173 / 276 ms | 0.84 / 0.89 s |
+| WebKit 26.5 on the same Mac, the 12 images of the table at the top | WebGPU / WebGPU / WebGPU | 333 of 333 | 291 / 1,977 ms | — |
+| Chrome 156 on a Galaxy S26, the same 12 images | WebGPU / WebAssembly (its check differed in 1 or 2 of 80 output steps, 7 of 7 times) / WebGPU | 335 of 335 | 766 / 849 ms (the CPU clock was capped on every image, more in the later `'wasm'` run) | 2.46 / 1.62 s |
+| Chrome 156 on a Pixel 8a, the same 12 images | WebGPU / WebGPU / WebGPU | 335 of 335 | 2,982 / 3,843 ms | 6.96 / 6.14 s |
+
+The Mac ran other work during these runs, so its times compare within a row only. Start = from `createWorker()` to the first text of the 390 x 800 phone screenshot, with the files in the cache (median of 3). The checks are part of it, as that screenshot needs the 320 and 640-wide recognizers (medians of the same 3 starts): 0.81 and 0.46 s on the Galaxy S26, 2.03 and 1.32 s on the Pixel 8a, 0.20 and 0.24 s on the Mac.
+
+The check reads one line, so it is a coarse guard: given `ppocrv6_small_rec_320_fp32.tflite` instead (which misreads lines on WebGPU), it saw the difference in Chrome 157 on the Mac (2 of 40 output steps) but not in WebKit 26.5, where that line read the same (probabilities within 2.9e-6). On the Galaxy S26, `recognizer: 'webgpu'` (every width on WebGPU, no check) read 13 of the 335 lines differently in Chrome 155 (2026-10-20). The detector reads the same on WebGPU and WebAssembly.
 
 ## Offline
 
@@ -230,14 +243,14 @@ All files are pinned: a fixed revision on Hugging Face and on jsDelivr, each che
 | `characters.json` | 168,510 | at start |
 | `ppocrv6_small_rec_640_fp32.tflite` | 21,477,068 | the first time a line is wider than 320 px at height 48; in a browser also in the background after the first result |
 | `ppocrv6_small_rec_960_fp32.tflite` | 21,476,976 | the first time a line is wider than 640 px; in a browser also in the background after the first result |
-| `ppocrv6_small_rec_320_fp32_webgpu.tflite` (the 320-wide recognizer for WebGPU, [above](#safari-and-webgpu)) | 21,517,364 | at start, in place of the 320 file above, where the recognizer may run on WebGPU (`recognizer: 'auto'` with WebAssembly on 1 thread and a WebGPU device, or `'webgpu'`) |
+| `ppocrv6_small_rec_320_fp32_webgpu.tflite` (the 320-wide recognizer for WebGPU, [above](#safari-and-webgpu)) | 21,517,364 | at start, in place of the 320 file above, where the recognizer may run on WebGPU: `recognizer: 'auto'` in a browser with a WebGPU device (unless `backend: 'wasm'` is given where WebAssembly has threads), or `'webgpu'` |
 | pdf.js 6.4.299 (`build/pdf.min.mjs` + `build/pdf.worker.min.mjs`, from jsDelivr) | 1,723,246 | browser: the first PDF given to `convert()` (Node.js uses the installed package) |
 | layout model, WebGPU form (`heronA_es_fp16w.tflite` + `heronB_es_fp16w.tflite` + `heron_host.bin`) | 87,698,160 | the first OCR page of `convert()` with the layout model on WebGPU (not published yet: `layoutModelBase`) |
 | layout model, WebAssembly form (`heronA_es.tflite` + `heronB_es.tflite` + `heron_host.bin`) | 173,054,412 | the same on WebAssembly (Node.js, or `layout: 'model'` without WebGPU) |
 
 Options for where the files come from:
 
-- `modelBase`: a directory URL (browser) or path (Node.js) with the five model files under their Hub names (`modelInfo.files`, and `modelInfo.rec320WebGpu` for the browsers where the recognizer may run on WebGPU). The files must match the pinned sha256. A directory made for litert-ocr 0.1.0 needs `ppocrv6_small_rec_320_fp32_webgpu.tflite` added: without it, `createWorker()` fails with `MODEL_FETCH_FAILED` wherever the recognizer may run on WebGPU: `recognizer: 'auto'` where WebAssembly runs on 1 thread and a WebGPU device exists (Safari), or `recognizer: 'webgpu'`.
+- `modelBase`: a directory URL (browser) or path (Node.js) with the five model files under their Hub names (`modelInfo.files`, and `modelInfo.rec320WebGpu` for the browsers where the recognizer may run on WebGPU). The files must match the pinned sha256. A directory made for litert-ocr 0.1.0 has no `ppocrv6_small_rec_320_fp32_webgpu.tflite`: with `recognizer: 'auto'` the worker then reads with the plain 320 file on WebAssembly, and a `'warn'` notice says the WebGPU form could not be loaded; `recognizer: 'webgpu'` fails with `MODEL_FETCH_FAILED`. Add the file to let the recognizer run on WebGPU.
 - `wasmPath`: a directory URL with the LiteRT.js 2.5.3 `wasm/` files (`node_modules/@litertjs/core/wasm/`).
 - `modelFiles`: replace single files, `{ rec320: { url, sha256 } }`; without `sha256` the file is used unverified (a notice says so). For trying other model files.
 - `eager: true`: load all five model files at start.
@@ -251,7 +264,7 @@ import { createWorker, createScheduler, recognize, PSM, OEM, OcrError, modelInfo
 ```
 
 - `createWorker(langs?, oem?, options?)` → `Promise<Worker>`. Options: `logger`, `errorHandler`, `modelBase`, `modelFiles`, `wasmPath`, `workerPath`, `backend` (`'auto'` = detector on WebGPU when it compiles, the browser default; `'wasm'`, the Node.js default), `recognizer` (below), `eager`, `prefetch`, `cachePath`, `cacheMethod`.
-- `recognizer`: `'auto'` (default; [Safari and WebGPU](#safari-and-webgpu)), `'wasm'` (always WebAssembly), or `'webgpu'` (experimental: every recognizer on WebGPU, the 320 one with its WebGPU form, no check). `worker.info.recognizers` shows where each width runs, `worker.info.recognizerReason` why, `worker.info.recognizerCheck` the start check of `'auto'` (`{ width, steps, differing, ms, text }`, or `null`).
+- `recognizer`: `'auto'` (default; [Safari and WebGPU](#safari-and-webgpu)), `'wasm'` (always WebAssembly), or `'webgpu'` (experimental: every recognizer on WebGPU, the 320 one with its WebGPU form, no check). `worker.info.recognizers` shows where each width runs, `worker.info.recognizerReason` why, `worker.info.recognizerCheck` the start check of `'auto'` (`{ width, steps, differing, maxDiff, limit, ms, text }`, or `null`), `worker.info.recognizerChecks` the check of each width (`null` where none ran yet). The 640 and 960 recognizers load on first use, so after each `recognize()` these fields show where every loaded width runs.
 - `worker.recognize(image, options?, output?, jobId?)` → `{ jobId, data }`. `image`: a URL or data URL, `File`, `Blob`, `<img>`, `<canvas>`, `CanvasRenderingContext2D`, `OffscreenCanvas`, `ImageBitmap`, `ImageData`, an `ArrayBuffer` / `Uint8Array` / `Buffer` of an image file, `{ data, width, height }` (RGBA), and in Node.js a file path. `options.rectangle = { left, top, width, height }` reads only that region (boxes stay in whole-image pixels). `output` defaults to `{ text: true }`; add `blocks: true`, `hocr: true`, `tsv: true`.
 - `data.text`: the lines, each ending in `"\n"`. `data.confidence`: mean word confidence, 0-100. `data.blocks` (when asked): `blocks[].paragraphs[].lines[].words[].symbols[]`, each with `text`, `confidence` (0-100) and `bbox { x0, y0, x1, y1 }`.
 - `worker.setParameters(params)`, `worker.terminate()` (a second call resolves and does nothing), `worker.reinitialize()` (no-op), `worker.info`.
