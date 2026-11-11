@@ -1,8 +1,8 @@
 // litert-ocr/extract in the browser: a document image (or PDF) and a JSON Schema -> a JSON object with those fields.
 // OCR (this library) -> the lines laid out in rows -> Gemma 4 E2B (the web build) on LiteRT-LM JS (WebGPU) with the
 // prompt below -> the answer repaired (R1-R3) and checked against the schema. Measured on CORD v2 receipts.
-// LiteRT-LM JS is an optional peer dependency pinned to 0.19.0-nightly.20261018: the stable 0.18.1 cannot create an
-// engine (google-ai-edge/LiteRT-LM#4051); move to the next stable release once it fixes that.
+// LiteRT-LM JS is an optional peer dependency pinned to the stable 0.19.0 (0.18.1 cannot create an engine:
+// google-ai-edge/LiteRT-LM#4051).
 
 import { OcrError, convert, createWorker, type ImageLike, type LoggerMessage, type WorkerOptions } from 'litert-ocr';
 import { answerProblems, buildPrompt, layoutText, repairJson, schemaProblems, type BoxedLine, type JsonSchema } from './core.js';
@@ -10,7 +10,7 @@ import { answerProblems, buildPrompt, layoutText, repairJson, schemaProblems, ty
 export { buildPrompt, layoutText, repairJson, schemaProblems, answerProblems, DEFAULT_INSTRUCTIONS } from './core.js';
 export type { JsonSchema, BoxedLine } from './core.js';
 
-export const LITERT_LM_VERSION = '0.19.0-nightly.20261018';
+export const LITERT_LM_VERSION = '0.19.0';
 /** Gemma 4 E2B, the web build (text in, text out), from litert-community at a pinned commit. */
 export const LLM_MODEL = {
   name: 'Gemma 4 E2B (gemma-4-E2B-it-web.litertlm)',

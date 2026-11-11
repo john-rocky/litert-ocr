@@ -743,7 +743,7 @@ window.tests = {
   async extractNoLiteRtLm() {
     // page-nollm.html: its import map has no @litert-lm/core
     const x = await import('litert-ocr/extract');
-    return expectError(() => x.extract(DOCS + 'scan.jpg', RECEIPT_SCHEMA, { ocr: local() }), 'LLM_UNAVAILABLE', ['@litert-lm/core@0.19.0-nightly.20261018']);
+    return expectError(() => x.extract(DOCS + 'scan.jpg', RECEIPT_SCHEMA, { ocr: local() }), 'LLM_UNAVAILABLE', ['@litert-lm/core@0.19.0']);
   },
   async extractModel404() {
     const x = await import('litert-ocr/extract');

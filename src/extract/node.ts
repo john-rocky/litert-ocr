@@ -6,7 +6,7 @@ import { OcrError } from 'litert-ocr';
 export { buildPrompt, layoutText, repairJson, schemaProblems, answerProblems, DEFAULT_INSTRUCTIONS } from './core.js';
 export type { JsonSchema, BoxedLine } from './core.js';
 
-export const LITERT_LM_VERSION = '0.19.0-nightly.20261018';
+export const LITERT_LM_VERSION = '0.19.0';
 
 const why = () =>
   new OcrError(

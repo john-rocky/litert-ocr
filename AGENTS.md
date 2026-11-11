@@ -37,7 +37,7 @@ Independent project, not affiliated with Google or PaddlePaddle.
 | An encrypted PDF | `convert(file, { password })`; without it `PDF_PASSWORD` | `src/doc/pdf.ts` |
 | Force OCR or only the text layer | `engine: 'ocr'` / `'layer'` (default `'auto'`: text layer where a page has one) | README "Documents → Markdown" |
 | Headings and tables of scanned pages from the layout model | `layoutModelBase: '<dir with the files of modelInfo.layout>'` while the model is not published; `layout: 'model'` / `'geometry'` | `src/core/models.ts` `LAYOUT_FILES`, `src/doc/layout.ts` |
-| Fields of a receipt / invoice as JSON (browser, WebGPU) | `import { extract } from 'litert-ocr/extract'`; `await extract(image, schema, { documentType: 'receipt' })` → `{ data, valid, errors }`; needs `@litert-lm/core@0.19.0-nightly.20261018`; first call downloads 2.0 GB | `src/extract/browser.ts` |
+| Fields of a receipt / invoice as JSON (browser, WebGPU) | `import { extract } from 'litert-ocr/extract'`; `await extract(image, schema, { documentType: 'receipt' })` → `{ data, valid, errors }`; needs `@litert-lm/core@0.19.0`; first call downloads 2.0 GB | `src/extract/browser.ts` |
 | Convert files from a shell | `npx litert-ocr file.pdf [--md\|--json\|--text] [--pages 1-3] [--out DIR]`; exit 0 / 2 (unreadable) / 3 (a page empty or failed) | `src/cli/main.ts` |
 | Give an agent a document tool | `claude mcp add litert-ocr -- npx -y litert-ocr mcp`; tools `convert_to_markdown`, `convert`, `ocr_image`, `list_input_formats` | `src/cli/mcp.ts`, `examples/mcp` |
 | Run the tests | `npm install && npm run build && npm test` (headless Chrome and WebKit via Playwright; Node; the CLI and the MCP server; Deno and Bun when installed) | `test/run.mjs` |

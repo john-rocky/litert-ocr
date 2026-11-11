@@ -39,7 +39,7 @@ Every failure is an `OcrError` with a stable `code`; the message says what happe
 | `PDF_PASSWORD` | the PDF is encrypted, or the password is wrong | pass `password` (CLI: `--password`) |
 | `PDF_UNAVAILABLE` | pdf.js could not load (blocked download in the browser; Node.js older than 22.13) | `pdfjsPath`, or a newer Node.js |
 | `PDF_RENDER_FAILED` | a page without a text layer could not be drawn for OCR (Node.js without `@napi-rs/canvas`) | `npm install @napi-rs/canvas`; the page is reported as failed, the others come back |
-| `LLM_UNAVAILABLE` | `extract()` in Node.js, or `@litert-lm/core` is not installed | run it in a browser; install `@litert-lm/core@0.19.0-nightly.20261018` |
+| `LLM_UNAVAILABLE` | `extract()` in Node.js, or `@litert-lm/core` is not installed | run it in a browser; install `@litert-lm/core@0.19.0` |
 | `LLM_WEBGPU_UNAVAILABLE` | `extract()` in a browser without WebGPU | a browser with WebGPU; `convert()` and OCR work without it |
 | `LLM_MODEL_FETCH_FAILED` | the 2.0 GB model did not download | the URL, the network, or `{ llm: { model } }` for your own copy |
 | `LLM_FAILED` | LiteRT-LM could not create the engine or stopped while answering | the LiteRT-LM message |

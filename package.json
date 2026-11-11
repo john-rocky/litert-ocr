@@ -83,7 +83,7 @@
     "zod": "3.25.76"
   },
   "peerDependencies": {
-    "@litert-lm/core": "0.19.0-nightly.20261018"
+    "@litert-lm/core": "0.19.0"
   },
   "peerDependenciesMeta": {
     "@litert-lm/core": {
@@ -91,7 +91,7 @@
     }
   },
   "devDependencies": {
-    "@litert-lm/core": "0.19.0-nightly.20261018",
+    "@litert-lm/core": "0.19.0",
     "@types/node": "24.19.2",
     "esbuild": "0.28.2",
     "playwright": "1.62.1",
