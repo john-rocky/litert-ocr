@@ -1,0 +1,73 @@
+# Publishes the package to npm with npm trusted publishing (OIDC): no npm token and no one-time password.
+# Runs when a GitHub release is published (its tag must be v<version in package.json>), or by hand from the Actions
+# tab (Run workflow) with dry_run, ticked by default: npm publish --dry-run, nothing is uploaded.
+# Needs a one-time setting on npmjs.com: the package's Settings -> Trusted publishing -> GitHub Actions, user
+# john-rocky, repository litert-ocr, workflow file publish.yml, allowed action npm publish. npm adds the provenance
+# statement itself (public repository). The browser tests (npm test) run before the version commit, on a machine
+# with a GPU; this job runs the Node.js tests.
+name: Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: npm publish --dry-run, nothing is uploaded'
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write # npm trusted publishing (OIDC)
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # an upload only for a published release, or a run by hand with dry_run unticked
+      DRY_RUN: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)) && 'false' || 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: npm 11.5.1 or later (trusted publishing needs it)
+        run: |
+          echo "node $(node --version), npm $(npm --version), dry run: $DRY_RUN"
+          if ! node -e 'const [a, b, c] = process.argv[1].split(".").map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)' "$(npm --version)"; then
+            npm install -g npm@11
+            echo "npm $(npm --version)"
+          fi
+
+      - name: The release tag is v<version in package.json>
+        if: github.event_name == 'release'
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          if [ "$GITHUB_REF_NAME" != "v$v" ]; then
+            echo "::error::The release tag $GITHUB_REF_NAME does not match the version $v in package.json (expected v$v)."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Node.js tests
+        run: node test/run.mjs node doc cli
+
+      - name: npm publish
+        run: |
+          if [ "$DRY_RUN" = "false" ]; then
+            npm publish
+          else
+            npm publish --dry-run
+          fi
