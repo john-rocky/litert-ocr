@@ -1,6 +1,6 @@
 # litert-ocr
 
-OCR for photos and screenshots in the browser and in Node.js, with the tesseract.js API. It runs PP-OCRv6-Small on LiteRT.js. Images never leave the device.
+OCR for photos and screenshots in the browser and in Node.js, with the tesseract.js API. It runs PP-OCRv6-Small on LiteRT.js. On 2026-11-10, version 0.2.1 read an image in 2,982 ms on a Pixel 8a in Chrome 156, with the model already loaded. Images never leave the device.
 
 <p align="center"><img alt="The demo page after reading a photo of a crumpled receipt: the photo with a box around each text line on the left, and the text it read on the right, 54 lines in 604 ms." src="docs/images/demo.jpg" width="860"></p>
 
