@@ -102,7 +102,7 @@ export interface Page {
   psm: string | null;
   /** Not used by this engine (null). */
   oem: string | null;
-  /** Library, model and runtime, e.g. "litert-ocr 0.2.1 (PP-OCRv6-Small @a9b2feb, LiteRT.js 2.5.3)". */
+  /** Library, model and runtime, e.g. "litert-ocr 0.2.2 (PP-OCRv6-Small @a9b2feb, LiteRT.js 2.5.3)". */
   version: string;
 }
 

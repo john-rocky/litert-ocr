@@ -79,7 +79,7 @@ if (parts.includes('compat')) {
     for (const name of ['readme', 'blocks']) {
       const t0 = Date.now();
       const context = await browser.newContext();
-      await context.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.1/+esm', (route) =>
+      await context.route('https://cdn.jsdelivr.net/npm/litert-ocr@0.2.2/+esm', (route) =>
         route.fulfill({ status: 200, contentType: 'text/javascript', headers: { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }, body: readFileSync(join(ROOT, 'dist/index.js')) }),
       );
       const page = await context.newPage();
