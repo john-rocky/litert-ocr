@@ -1,10 +1,11 @@
 # Publishes the package to npm with npm trusted publishing (OIDC): no npm token and no one-time password.
 # Runs when a GitHub release is published (its tag must be v<version in package.json>), or by hand from the Actions
-# tab (Run workflow) with dry_run, ticked by default: npm publish --dry-run, nothing is uploaded.
+# tab (Run workflow) with dry_run, ticked by default: npm publish --dry-run, nothing is uploaded. A dry run of a
+# version that is already on npm ends with npm's "You cannot publish over the previously published versions".
 # Needs a one-time setting on npmjs.com: the package's Settings -> Trusted publishing -> GitHub Actions, user
-# john-rocky, repository litert-ocr, workflow file publish.yml, allowed action npm publish. npm adds the provenance
-# statement itself (public repository). The browser tests (npm test) run before the version commit, on a machine
-# with a GPU; this job runs the Node.js tests.
+# john-rocky, repository litert-ocr, workflow file publish.yml, allowed action npm publish; the first publish must
+# follow within 2 days, or the setting expires. npm adds the provenance statement itself (public repository).
+# The browser tests (npm test) run before the version commit, on a machine with a GPU; this job runs the Node.js tests.
 name: Publish to npm
 
 on:
